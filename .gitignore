@@ -1,0 +1,17 @@
+# virtualenvs
+venvs/
+
+# large content & corpora
+library/
+corpus/
+tmp/
+tri_runs/
+recovered_bookshelf/
+
+# python
+__pycache__/
+*.pyc
+
+# logs
+*.log
+/tmp/
