@@ -6,6 +6,46 @@ echo "# AI System Inventory" > "$OUT"
 echo "Generated: $(date)" >> "$OUT"
 echo >> "$OUT"
 
+echo "## Project State (FineTuningAI)" >> "$OUT"
+echo >> "$OUT"
+
+echo "- Repo path: $HOME/FineTuningAI" >> "$OUT"
+
+echo -n "- Git remote origin: " >> "$OUT"
+git -C "$HOME/FineTuningAI" remote get-url origin 2>/dev/null >> "$OUT" || echo "NOT SET" >> "$OUT"
+
+echo -n "- Branch: " >> "$OUT"
+git -C "$HOME/FineTuningAI" rev-parse --abbrev-ref HEAD 2>/dev/null >> "$OUT" || echo "UNKNOWN" >> "$OUT"
+
+echo -n "- Head commit: " >> "$OUT"
+git -C "$HOME/FineTuningAI" log -1 --pretty=format:"%h %ad %s" --date=iso 2>/dev/null >> "$OUT" || echo "NONE" >> "$OUT"
+echo >> "$OUT"
+
+echo "- Working tree changes: $(git -C "$HOME/FineTuningAI" status --porcelain 2>/dev/null | wc -l) item(s)" >> "$OUT"
+echo >> "$OUT"
+
+echo "## Bookshelf Wiring" >> "$OUT"
+echo >> "$OUT"
+
+echo "- Desktop file: $HOME/Desktop/Bookshelf.desktop" >> "$OUT"
+
+echo "- Desktop Exec line:" >> "$OUT"
+grep "^Exec=" "$HOME/Desktop/Bookshelf.desktop" 2>/dev/null >> "$OUT" || echo "NOT FOUND" >> "$OUT"
+
+echo >> "$OUT"
+echo "- Launcher present:" >> "$OUT"
+[ -f "$HOME/FineTuningAI/bin/bookshelf_launch" ] && echo "yes" >> "$OUT" || echo "no" >> "$OUT"
+
+echo "- Server .py size:" >> "$OUT"
+ls -lh "$HOME/FineTuningAI/bin/bookshelf_server.py" 2>/dev/null >> "$OUT" || echo "MISSING" >> "$OUT"
+
+echo "- Fallback .pyc present:" >> "$OUT"
+[ -f "$HOME/FineTuningAI/bin/__pycache__/bookshelf_server.cpython-312.pyc" ] && echo "yes" >> "$OUT" || echo "no" >> "$OUT"
+
+echo "- URL: http://127.0.0.1:8787" >> "$OUT"
+echo >> "$OUT"
+
+
 echo "## Host / OS" >> "$OUT"
 uname -a >> "$OUT"
 echo >> "$OUT"
