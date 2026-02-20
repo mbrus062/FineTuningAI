@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE="/ai_data/ebooks/Christian/CCEL"
+
+fetch () {
+  local url="$1"
+  local out="$2"
+  mkdir -p "$(dirname "$out")"
+  echo "Fetching: $url"
+  curl -L --fail --retry 5 "$url" -o "$out"
+}
+
+# --- MEDIEVAL ---
+fetch https://www.ccel.org/ccel/anselm/proslogion.txt \
+      "$BASE/Medieval/Anselm/Proslogion.txt"
+
+fetch https://www.ccel.org/ccel/anselm/curdeushomo.txt \
+      "$BASE/Medieval/Anselm/Cur_Deus_Homo.txt"
+
+fetch https://www.ccel.org/ccel/bernard/consideration.txt \
+      "$BASE/Medieval/Bernard/On_Consideration.txt"
+
+fetch https://www.ccel.org/ccel/bonaventure/mind.txt \
+      "$BASE/Medieval/Bonaventure/Minds_Road_to_God.txt"
+
+fetch https://www.ccel.org/ccel/kempis/imitation.txt \
+      "$BASE/Medieval/Kempis/Imitation_of_Christ.txt"
+
+# --- REFORMATION ---
+fetch https://www.ccel.org/ccel/luther/romans.txt \
+      "$BASE/Reformation/Luther/Romans_Commentary.txt"
+
+fetch https://www.ccel.org/ccel/luther/galatians.txt \
+      "$BASE/Reformation/Luther/Galatians_Commentary.txt"
+
+# --- PURITANS ---
+fetch https://www.ccel.org/ccel/edwards/will.txt \
+      "$BASE/Puritans/Edwards/Freedom_of_the_Will.txt"
+
+fetch https://www.ccel.org/ccel/edwards/affections.txt \
+      "$BASE/Puritans/Edwards/Religious_Affections.txt"
+
+fetch https://www.ccel.org/ccel/edwards/originalsin.txt \
+      "$BASE/Puritans/Edwards/Original_Sin.txt"
+
+echo "Stage 1 CCEL acquisition complete."

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OUTBASE="${1:-/ai_data/ebooks/History/History_of_the_Christian_Church_Philip_Schaff}"
+TOOL="/home/mario/FineTuningAI/bin/ia_pdf_fetch_verify"
+
+mkdir -p "$OUTBASE"
+
+python3 - "$OUTBASE" "$TOOL" <<'PY'
+import json, sys, urllib.parse, urllib.request, subprocess, re
+outbase, tool = sys.argv[1], sys.argv[2]
+
+# Advanced Search: fetch identifiers for "History of the Christian Church" by Philip Schaff
+q = 'title:("History of the Christian Church") AND creator:("Schaff, Philip")'
+params = {
+    "q": q,
+    "fl[]": "identifier",
+    "rows": "200",
+    "page": "1",
+    "output": "json",
+}
+url = "https://archive.org/advancedsearch.php?" + urllib.parse.urlencode(params, doseq=True)
+
+with urllib.request.urlopen(url) as r:
+    data = json.loads(r.read().decode("utf-8", "replace"))
+
+idents = [d["identifier"] for d in data.get("response", {}).get("docs", []) if "identifier" in d]
+
+# Prefer the classic volume ids when present; keep others too (IA has multiple editions/scans)
+classic = [i for i in idents if re.match(r"^historyofchris(t)?\d{2}scha$", i)]
+others  = [i for i in idents if i not in classic]
+
+ordered = sorted(classic) + sorted(others)
+
+if not ordered:
+    print("No identifiers found via advancedsearch. Query was:", q)
+    sys.exit(2)
+
+print("Found identifiers:")
+for i in ordered:
+    print(" -", i)
+
+for ident in ordered:
+    outdir = f"{outbase}/{ident}/PDF"
+    print("\n=== Downloading:", ident, "=>", outdir)
+    subprocess.check_call([tool, ident, outdir])
+
+print("\nDONE: Schaff batch complete.")
+PY

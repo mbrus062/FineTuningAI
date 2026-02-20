@@ -1,0 +1,275 @@
+#!/usr/bin/env python3
+import argparse
+import csv
+import os
+import re
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Tuple
+
+DEFAULT_ROOT = "/ai_data/ebooks"
+
+INV_DIR = Path.home() / "FineTuningAI" / "inventory"
+CHECKLIST_DIR = INV_DIR / "checklists"
+
+DEFAULT_OUT = str(INV_DIR / "ebooks_inventory.csv")
+DEFAULT_WISHLIST_PATH = str(INV_DIR / "ebooks_wishlist.txt")
+DEFAULT_CHECKLISTS = sorted([str(p) for p in CHECKLIST_DIR.glob("*.txt")])
+
+EXTS = {".pdf", ".epub", ".mobi", ".djvu", ".txt", ".docx", ".odt", ".htm", ".html", ".rtf", ".azw", ".azw3", ".azw4"}
+
+# common “noise” dirs; you can add/remove anytime
+DEFAULT_EXCLUDE_DIRS = {"_imports", ".git", ".venv", "__pycache__", ".cache"}
+
+def normalize(s: str) -> str:
+    s = s.lower()
+    s = s.replace("&", "and")
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def safe_read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_text(encoding="latin-1", errors="ignore")
+
+def iter_book_files(root: Path, exts: set, exclude_dirs: set) -> Iterable[Path]:
+    # skip excluded subtrees early
+    for p in root.rglob("*"):
+        if p.is_dir():
+            continue
+        if p.suffix.lower() not in exts:
+            continue
+        # exclude if any directory component is in exclude_dirs
+        parts = set(p.parts)
+        if parts & exclude_dirs:
+            continue
+        yield p
+
+@dataclass
+class BookFile:
+    path: Path
+    name: str
+    ext: str
+    size: int
+    mtime_iso: str
+    norm: str
+
+def build_index(root: Path, exts: set, exclude_dirs: set) -> List[BookFile]:
+    out: List[BookFile] = []
+    for p in iter_book_files(root, exts, exclude_dirs):
+        try:
+            st = p.stat()
+        except FileNotFoundError:
+            continue
+        out.append(
+            BookFile(
+                path=p,
+                name=p.name,
+                ext=p.suffix.lower(),
+                size=int(st.st_size),
+                mtime_iso=datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+                norm=normalize(str(p)),
+            )
+        )
+    # stable, useful ordering
+    out.sort(key=lambda bf: (normalize(bf.name), str(bf.path)))
+    return out
+
+def write_inventory_csv(files: List[BookFile], out_csv: Path) -> None:
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    with out_csv.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["filename", "ext", "bytes", "modified", "path"])
+        for bf in files:
+            w.writerow([bf.name, bf.ext, bf.size, bf.mtime_iso, str(bf.path)])
+
+def parse_checklist_line(line: str) -> Optional[Tuple[str, str]]:
+    # Accept:
+    # - "Author | Title"
+    # - "Author | Title;AltTitle;AltTitle2"
+    # ignore status annotations if present
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+    if line.startswith("-"):
+        line = line[1:].strip()
+
+    if "|" not in line:
+        return None
+    author, title = [x.strip() for x in line.split("|", 1)]
+    if not author or not title:
+        return None
+    return author, title
+
+def match_checklist(author: str, title_field: str, files: List[BookFile]) -> Tuple[str, List[Path]]:
+    # title_field may contain synonyms separated by ';'
+    author_n = normalize(author)
+    title_variants = [normalize(x.strip()) for x in title_field.split(";") if x.strip()]
+    if not title_variants:
+        title_variants = [normalize(title_field)]
+
+    primary_hits: List[Path] = []
+    author_only_hits: List[Path] = []
+
+    for bf in files:
+        has_author = author_n in bf.norm if author_n else False
+        has_title = any(tv in bf.norm for tv in title_variants if tv)
+        if has_author and has_title:
+            primary_hits.append(bf.path)
+        elif has_author:
+            author_only_hits.append(bf.path)
+
+    if primary_hits:
+        return "PRESENT_PRIMARY", sorted(primary_hits, key=lambda p: normalize(p.name))
+    if author_only_hits:
+        return "PRESENT_AUTHOR_ONLY", sorted(author_only_hits, key=lambda p: normalize(p.name))
+    return "MISSING", []
+
+def write_checklist_report(checklists: List[str], files: List[BookFile], root: Path, out_path: Path) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    now = datetime.now().isoformat(timespec="seconds")
+    total = len(files)
+
+    lines: List[str] = []
+    lines.append(f"Checklist report generated: {now}")
+    lines.append(f"Scanned root: {root}")
+    lines.append(f"Total indexed files: {total}")
+    lines.append("")
+
+    for cl in checklists:
+        clp = Path(cl)
+        lines.append(f"=== CHECKLIST: {clp} ===")
+
+        entries: List[Tuple[str, str]] = []
+        if clp.exists():
+            for raw in safe_read_text(clp).splitlines():
+                parsed = parse_checklist_line(raw)
+                if parsed:
+                    entries.append(parsed)
+        # Alphabetize by (author, title) in the report (your request)
+        entries.sort(key=lambda x: (normalize(x[0]), normalize(x[1])))
+
+        primary = author_only = missing = 0
+        for author, title_field in entries:
+            status, hits = match_checklist(author, title_field, files)
+            if status == "PRESENT_PRIMARY":
+                primary += 1
+            elif status == "PRESENT_AUTHOR_ONLY":
+                author_only += 1
+            else:
+                missing += 1
+
+            lines.append(f"- {author} | {title_field} : {status}")
+            for hp in hits:
+                lines.append(f"    {hp}")
+        lines.append("")
+        lines.append(f"Summary: PRIMARY={primary}  AUTHOR_ONLY={author_only}  MISSING={missing}")
+        lines.append("")
+
+    out_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+def parse_wishlist_lines(path: Path) -> List[Tuple[str, str]]:
+    # Accept:
+    # 1) "Label (any) (query words)"
+    # 2) "Label | query words"
+    items: List[Tuple[str, str]] = []
+    if not path.exists():
+        return items
+    for raw in safe_read_text(path).splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            continue
+        if "|" in s:
+            label, q = [x.strip() for x in s.split("|", 1)]
+            if label and q:
+                items.append((label, q))
+            continue
+        # last (...) is treated as query
+        m = re.findall(r"\(([^()]*)\)", s)
+        if m:
+            q = m[-1].strip()
+            label = re.sub(r"\([^()]*\)\s*$", "", s).strip()
+            if label and q:
+                items.append((label, q))
+    # Alphabetize by label
+    items.sort(key=lambda x: normalize(x[0]))
+    return items
+
+def wishlist_hits(query: str, files: List[BookFile]) -> List[Path]:
+    qn = normalize(query)
+    if not qn:
+        return []
+    hits = [bf.path for bf in files if qn in bf.norm]
+    hits.sort(key=lambda p: normalize(p.name))
+    return hits
+
+def write_wishlist_report(wishlist_path: Path, files: List[BookFile], root: Path, out_path: Path) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    now = datetime.now().isoformat(timespec="seconds")
+    total = len(files)
+
+    lines: List[str] = []
+    lines.append(f"Wishlist report generated: {now}")
+    lines.append(f"Scanned root: {root}")
+    lines.append(f"Total indexed files: {total}")
+    lines.append(f"Wishlist file: {wishlist_path}")
+    lines.append("")
+
+    items = parse_wishlist_lines(wishlist_path)
+    for label, query in items:
+        hits = wishlist_hits(query, files)
+        status = "PRESENT" if hits else "MISSING"
+        lines.append(f"- {query} ({label}): {status} ({len(hits)} hit(s))")
+        if hits:
+            for hp in hits:
+                lines.append(f"    {hp}")
+        lines.append("")
+
+
+    out_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Ebook inventory + checklist + wishlist reports")
+    ap.add_argument("--root", default=DEFAULT_ROOT, help=f"Root to scan (default: {DEFAULT_ROOT})")
+    ap.add_argument("--out", default=DEFAULT_OUT, help="Inventory CSV output path")
+    ap.add_argument("--wishlist", default=DEFAULT_WISHLIST_PATH, help="Wishlist file path")
+    ap.add_argument("--checklists", nargs="*", default=DEFAULT_CHECKLISTS, help="Checklist file(s) to run")
+    ap.add_argument("--include-imports", action="store_true", help="Include _imports/ in scan (default excludes it)")
+    ap.add_argument("--exclude-dirs", nargs="*", default=sorted(DEFAULT_EXCLUDE_DIRS), help="Dir names to exclude from scan")
+    args = ap.parse_args()
+
+    root = Path(args.root).expanduser()
+    out_csv = Path(args.out).expanduser()
+    wishlist_path = Path(args.wishlist).expanduser()
+    checklist_report = INV_DIR / "ebooks_checklist_report.txt"
+    wishlist_report = INV_DIR / "ebooks_wishlist_report.txt"
+
+    exclude = set(args.exclude_dirs)
+    if args.include_imports:
+        exclude.discard("_imports")
+
+    files = build_index(root, EXTS, exclude)
+
+    write_inventory_csv(files, out_csv)
+    write_checklist_report(args.checklists, files, root, checklist_report)
+    write_wishlist_report(wishlist_path, files, root, wishlist_report)
+
+    print("\n=== INVENTORY SUMMARY ===")
+    print(f"Inventory CSV: {out_csv}")
+    print(f"Wishlist report: {wishlist_report}")
+    print(f"Checklist report: {checklist_report}")
+
+    # Print full reports to terminal (your request: no truncation)
+    print(f"\n--- {checklist_report} (FULL) ---")
+    print(checklist_report.read_text(encoding="utf-8"))
+
+    print(f"\n--- {wishlist_report} (FULL) ---")
+    print(wishlist_report.read_text(encoding="utf-8"))
+
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())

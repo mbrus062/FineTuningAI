@@ -1,0 +1,317 @@
+#!/usr/bin/env python3
+import os
+import re
+import sys
+import sqlite3
+from pathlib import Path
+from datetime import datetime
+
+DB = Path("/ai_data/ebooks/_corpus_index/unified_fts.sqlite")
+OUTDIR = Path("/ai_data/ebooks/_catalogs")
+
+# ---------- helpers ----------
+def die(msg: str, code: int = 1) -> None:
+    print(f"ERROR: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+def slug(s: str) -> str:
+    s = (s or "").strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    return s or "unknown"
+
+def norm_ws(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "")).strip()
+
+def html_escape(s: str) -> str:
+    s = s or ""
+    return (s.replace("&", "&amp;")
+              .replace("<", "&lt;")
+              .replace(">", "&gt;")
+              .replace('"', "&quot;")
+              .replace("'", "&#39;"))
+
+def get_tables(conn: sqlite3.Connection) -> set[str]:
+    cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    return {r[0] for r in cur.fetchall()}
+
+def get_cols(conn: sqlite3.Connection, table: str) -> set[str]:
+    cur = conn.execute(f"PRAGMA table_info({table})")
+    return {r[1] for r in cur.fetchall()}
+
+def pick_first(existing: set[str], candidates: list[str]) -> str | None:
+    for c in candidates:
+        if c in existing:
+            return c
+    return None
+
+def infer_tradition(rel_path: str) -> str:
+    p = (rel_path or "").lower()
+    if p.startswith("clean_txt/jewish/") or "/jewish/" in p:
+        return "Jewish"
+    if p.startswith("clean_txt/christian/") or "/christian/" in p:
+        return "Christian"
+    if p.startswith("clean_txt/reference/") or "/reference/" in p:
+        return "Reference"
+    if "/classical/" in p or "/loeb_" in p:
+        return "Classical"
+    return "Other"
+
+def infer_topic(rel_path: str) -> str:
+    # Crude but effective: top 2-3 folders after clean_txt/
+    p = rel_path.replace("\\", "/")
+    parts = [x for x in p.split("/") if x]
+    try:
+        i = parts.index("clean_txt")
+        parts = parts[i+1:]
+    except ValueError:
+        pass
+    # avoid leaf filename
+    parts = parts[:-1] if len(parts) >= 2 else parts
+    return "/".join(parts[:3]) if parts else "Unknown"
+
+def safe_file_url(path: Path) -> str:
+    # file:// links for local browsing
+    return "file://" + str(path)
+
+# ---------- main ----------
+def main() -> None:
+    if not DB.exists():
+        die(f"DB not found at: {DB}")
+
+    OUTDIR.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(str(DB))
+    conn.row_factory = sqlite3.Row
+
+    tables = get_tables(conn)
+
+    # We want a metadata table if it exists; common names:
+    meta_table = None
+    for t in ["docs", "documents", "library", "files", "items", "doc_meta"]:
+        if t in tables:
+            meta_table = t
+            break
+
+    # If no obvious metadata table, we will still try from docs_fts (limited fields)
+    use_fts_only = False
+    if meta_table is None:
+        if "docs_fts" in tables:
+            use_fts_only = True
+        else:
+            die("Could not find a metadata table (docs/documents/files/...) or docs_fts in the DB.")
+
+    rows = []
+
+    if use_fts_only:
+        # Only rel_path + text are likely available; everything else inferred
+        cols = get_cols(conn, "docs_fts")
+        rel_col = pick_first(cols, ["rel_path", "path"])
+        if not rel_col:
+            die("docs_fts exists but has no rel_path/path column to build a catalog.")
+        q = f"SELECT {rel_col} AS rel_path FROM docs_fts"
+        for r in conn.execute(q):
+            rel_path = r["rel_path"]
+            tradition = infer_tradition(rel_path)
+            topic = infer_topic(rel_path)
+            rows.append({
+                "tradition": tradition,
+                "author": "Unknown",
+                "title": Path(rel_path).stem,
+                "language": "Unknown",
+                "source": "Unknown",
+                "status": "Unknown",
+                "rel_path": rel_path,
+                "topic": topic,
+            })
+    else:
+        cols = get_cols(conn, meta_table)
+
+        rel_col = pick_first(cols, ["rel_path", "path"])
+        if not rel_col:
+            die(f"Metadata table '{meta_table}' does not have rel_path/path column.")
+
+        # Try to map columns if present; otherwise infer
+        author_col = pick_first(cols, ["author", "creator", "authors"])
+        title_col  = pick_first(cols, ["title", "name", "doc_title"])
+        lang_col   = pick_first(cols, ["language", "lang"])
+        src_col    = pick_first(cols, ["source", "origin", "provider"])
+        stat_col   = pick_first(cols, ["status", "ingest_status"])
+        trad_col   = pick_first(cols, ["tradition", "collection", "category"])
+        notes_col  = pick_first(cols, ["notes", "note"])
+
+        select_cols = [f"{rel_col} AS rel_path"]
+        if author_col: select_cols.append(f"{author_col} AS author")
+        if title_col:  select_cols.append(f"{title_col} AS title")
+        if lang_col:   select_cols.append(f"{lang_col} AS language")
+        if src_col:    select_cols.append(f"{src_col} AS source")
+        if stat_col:   select_cols.append(f"{stat_col} AS status")
+        if trad_col:   select_cols.append(f"{trad_col} AS tradition")
+        if notes_col:  select_cols.append(f"{notes_col} AS notes")
+
+        q = f"SELECT {', '.join(select_cols)} FROM {meta_table}"
+        for r in conn.execute(q):
+            rel_path = r["rel_path"]
+            author = norm_ws(r["author"]) if "author" in r.keys() else ""
+            title  = norm_ws(r["title"])  if "title"  in r.keys() else ""
+            language = norm_ws(r["language"]) if "language" in r.keys() else ""
+            source   = norm_ws(r["source"]) if "source" in r.keys() else ""
+            status   = norm_ws(r["status"]) if "status" in r.keys() else ""
+            tradition = norm_ws(r["tradition"]) if "tradition" in r.keys() else ""
+
+            # fallbacks
+            if not tradition:
+                tradition = infer_tradition(rel_path)
+            if not title:
+                title = Path(rel_path).stem
+            if not author:
+                author = "Unknown"
+            if not language:
+                language = "Unknown"
+            if not source:
+                # infer a little from path
+                p = rel_path.lower()
+                if "/sefaria/" in p: source = "Sefaria"
+                elif "/gutenberg/" in p: source = "Gutenberg"
+                elif "/ccel/" in p: source = "CCEL"
+                elif "/archiveorg/" in p or "/ia_" in p or "/internet_archive/" in p: source = "IA"
+                else: source = "Unknown"
+            if not status:
+                status = "Unknown"
+
+            topic = infer_topic(rel_path)
+
+            rows.append({
+                "tradition": tradition,
+                "author": author,
+                "title": title,
+                "language": language,
+                "source": source,
+                "status": status,
+                "rel_path": rel_path,
+                "topic": topic,
+            })
+
+    conn.close()
+
+    # ---------- TSV outputs ----------
+    master_tsv = OUTDIR / "library_master.tsv"
+    by_source_tsv = OUTDIR / "library_by_source.tsv"
+    by_topic_tsv = OUTDIR / "library_by_topic.tsv"
+
+    # Sort master: tradition → author → title
+    rows_sorted = sorted(rows, key=lambda x: (
+        (x["tradition"] or "").lower(),
+        (x["author"] or "").lower(),
+        (x["title"] or "").lower(),
+        (x["rel_path"] or "").lower(),
+    ))
+
+    def write_tsv(path: Path, header: list[str], data: list[dict]) -> None:
+        with path.open("w", encoding="utf-8") as f:
+            f.write("\t".join(header) + "\n")
+            for d in data:
+                f.write("\t".join(d.get(h, "") for h in header) + "\n")
+
+    write_tsv(
+        master_tsv,
+        ["tradition", "author", "title", "language", "source", "status", "rel_path"],
+        rows_sorted
+    )
+
+    # By source grouping (still TSV, but sorted for grouping)
+    rows_by_source = sorted(rows, key=lambda x: (
+        (x["source"] or "").lower(),
+        (x["tradition"] or "").lower(),
+        (x["author"] or "").lower(),
+        (x["title"] or "").lower(),
+    ))
+    write_tsv(
+        by_source_tsv,
+        ["source", "tradition", "author", "title", "language", "status", "rel_path"],
+        rows_by_source
+    )
+
+    # By topic grouping
+    rows_by_topic = sorted(rows, key=lambda x: (
+        (x["topic"] or "").lower(),
+        (x["tradition"] or "").lower(),
+        (x["author"] or "").lower(),
+        (x["title"] or "").lower(),
+    ))
+    write_tsv(
+        by_topic_tsv,
+        ["topic", "tradition", "author", "title", "language", "source", "status", "rel_path"],
+        rows_by_topic
+    )
+
+        # ---------- HTML output ----------
+    html_path = OUTDIR / "library_catalog.html"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Build nested: tradition → author → items
+    nested: dict[str, dict[str, list[dict]]] = {}
+    for d in rows_sorted:
+        nested.setdefault(d["tradition"], {}).setdefault(d["author"], []).append(d)
+
+    css = """
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+h1 { margin: 0 0 6px 0; font-size: 26px; }
+.meta { color: #666; margin-bottom: 18px; }
+details { border: 1px solid #ddd; border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+summary { cursor: pointer; font-weight: 700; }
+.author { margin: 12px 0 6px; font-weight: 700; }
+.item { padding: 6px 0; border-bottom: 1px dashed #eee; }
+.item:last-child { border-bottom: 0; }
+.badges { font-size: 12px; color: #444; }
+.badge { display: inline-block; padding: 2px 8px; border: 1px solid #ddd; border-radius: 999px; margin-right: 6px; }
+.path { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #555; margin-top: 2px; }
+a { color: #0a58ca; text-decoration: none; }
+a:hover { text-decoration: underline; }
+"""
+
+    with html_path.open("w", encoding="utf-8") as f:
+        f.write("<!doctype html>\n<html>\n<head>\n")
+        f.write("<meta charset='utf-8'>\n")
+        f.write("<meta name='viewport' content='width=device-width, initial-scale=1'>\n")
+        f.write("<title>Library Catalog</title>\n")
+        f.write(f"<style>\n{css}\n</style>\n</head>\n<body>\n")
+
+        f.write("<h1>Library Catalog</h1>\n")
+        f.write(
+            f"<div class='meta'>Generated: {html_escape(now)}"
+            f" &nbsp; | &nbsp; DB: {html_escape(str(DB))}"
+            f" &nbsp; | &nbsp; Entries: {len(rows_sorted)}</div>\n"
+        )
+
+        for trad, authors in sorted(nested.items(), key=lambda kv: kv[0].lower()):
+            total = sum(len(v) for v in authors.values())
+            f.write(f"<details open>\n<summary>{html_escape(trad)} ({total})</summary>\n")
+
+            for author, items in sorted(authors.items(), key=lambda kv: kv[0].lower()):
+                f.write(f"<div class='author'>{html_escape(author)} ({len(items)})</div>\n")
+
+                for d in items:
+                    rel_path = d["rel_path"]
+                    full_path = Path("/ai_data/ebooks") / rel_path
+                    link = safe_file_url(full_path) if full_path.exists() else ""
+
+                    title_html = html_escape(d["title"])
+                    if link:
+                        title_html = f"<a href='{html_escape(link)}'>{title_html}</a>"
+
+                    f.write("<div class='item'>\n")
+                    f.write(f"  <div>{title_html}</div>\n")
+                    f.write("  <div class='badges'>\n")
+                    f.write(f"    <span class='badge'>{html_escape(d['language'])}</span>\n")
+                    f.write(f"    <span class='badge'>{html_escape(d['source'])}</span>\n")
+                    f.write(f"    <span class='badge'>{html_escape(d['status'])}</span>\n")
+                    f.write("  </div>\n")
+                    f.write(f"  <div class='path'>{html_escape(rel_path)}</div>\n")
+                    f.write("</div>\n")
+
+            f.write("</details>\n")
+
+        f.write("</body>\n</html>\n")
+
+if __name__ == "__main__":
+    main()

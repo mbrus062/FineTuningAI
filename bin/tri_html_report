@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import html
+import os
+import re
+from pathlib import Path
+from datetime import datetime
+
+def try_markdown_to_html(md_text: str) -> tuple[str, bool]:
+    """
+    Returns (html_body, rendered_flag).
+    Uses python3-markdown if installed, else falls back to <pre>.
+    """
+    try:
+        import markdown  # type: ignore
+        # Useful extensions if available in packaged markdown; safe if missing.
+        exts = []
+        for ext in ["extra", "tables", "toc", "sane_lists", "nl2br"]:
+            exts.append(ext)
+        body = markdown.markdown(md_text, extensions=exts, output_format="html5")
+        return body, True
+    except Exception:
+        # Fallback: keep raw with preserved whitespace
+        return f"<pre class='pre'>{html.escape(md_text)}</pre>", False
+
+def guess_model_from_filename(p: Path) -> str:
+    name = p.stem
+    # common normalization
+    name = name.replace("_", ":")
+    name = name.replace("___", "/")
+    # prefer nice labels for wrappers
+    name = name.replace("enoch-md", "enoch-md")
+    name = name.replace("qwen-md", "qwen-md")
+    name = name.replace("gemma-md", "gemma-md")
+    return name
+
+def extract_prompt(text: str) -> str | None:
+    # If your saved files contain the header "PROMPT:" then capture until "--- RESPONSE ---"
+    m = re.search(r"(?s)\bPROMPT:\s*\n(.*?)\n\s*---\s*RESPONSE\s*---", text)
+    if m:
+        return m.group(1).strip()
+    return None
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Create a 3-column HTML comparison report from a tri_ollama run directory."
+    )
+    ap.add_argument("run_dir", help="Path to tri_runs/<timestamp> directory")
+    ap.add_argument("--out", help="Output HTML file path (default: <run_dir>/tri_compare.html)")
+    ap.add_argument("--open", action="store_true", help="Open in default browser after generating")
+    ap.add_argument("--order", default="", help="Comma-separated model order (e.g., gemma-md,qwen-md,enoch-md)")
+    ap.add_argument("--title", default="", help="Optional report title")
+    args = ap.parse_args()
+
+    run_dir = Path(args.run_dir).expanduser().resolve()
+    if not run_dir.exists() or not run_dir.is_dir():
+        raise SystemExit(f"Run dir not found or not a directory: {run_dir}")
+
+    out_path = Path(args.out).expanduser().resolve() if args.out else (run_dir / "tri_compare.html")
+
+    txt_files = sorted(run_dir.glob("*.txt"))
+    if not txt_files:
+        raise SystemExit(f"No .txt outputs found in: {run_dir}")
+
+    # Load and convert
+    blocks = []
+    prompt_found = None
+
+    for f in txt_files:
+        raw = f.read_text(errors="replace")
+        if prompt_found is None:
+            prompt_found = extract_prompt(raw)
+
+        model_label = guess_model_from_filename(f)
+        body_html, rendered = try_markdown_to_html(raw)
+
+        blocks.append({
+            "model": model_label,
+            "file": str(f),
+            "rendered": rendered,
+            "body": body_html
+        })
+
+    # Optional ordering
+    if args.order.strip():
+        desired = [x.strip() for x in args.order.split(",") if x.strip()]
+        order_map = {name: i for i, name in enumerate(desired)}
+        blocks.sort(key=lambda b: order_map.get(b["model"], 999))
+
+    title = args.title.strip() or f"tri_ollama comparison — {run_dir.name}"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    prompt_html = ""
+    if prompt_found:
+        prompt_html = f"""
+        <details open>
+          <summary><strong>Prompt (click to collapse)</strong></summary>
+          <pre class="pre prompt">{html.escape(prompt_found)}</pre>
+        </details>
+        """
+    else:
+        prompt_html = f"""
+        <details>
+          <summary><strong>Prompt</strong></summary>
+          <div class="note">Prompt block not detected in saved files. (Still showing full outputs below.)</div>
+        </details>
+        """
+
+    # Build HTML
+    cols_html = "\n".join([
+        f"""
+        <section class="col">
+          <header class="colhead">
+            <div class="model">{html.escape(b["model"])}</div>
+            <div class="meta">
+              <span class="pill">{'Markdown rendered' if b['rendered'] else 'Plain text'}</span>
+              <span class="path" title="{html.escape(b['file'])}">{html.escape(Path(b["file"]).name)}</span>
+            </div>
+          </header>
+          <article class="content">
+            {b["body"]}
+          </article>
+        </section>
+        """
+        for b in blocks
+    ])
+
+    html_doc = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>{html.escape(title)}</title>
+<style>
+  :root {{
+    --bg: #0b0c10;
+    --panel: #11131a;
+    --border: #2a2f3a;
+    --text: #e8eaf0;
+    --muted: #aab1c2;
+    --pill: #1c2330;
+    --accent: #6aa6ff;
+    --shadow: 0 8px 24px rgba(0,0,0,.35);
+  }}
+  body {{
+    margin: 0;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial;
+    background: var(--bg);
+    color: var(--text);
+  }}
+  .wrap {{
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 18px 16px 28px;
+  }}
+  h1 {{
+    font-size: 20px;
+    margin: 0 0 6px;
+    letter-spacing: .2px;
+  }}
+  .sub {{
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 12px;
+  }}
+  details {{
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 10px 12px;
+    box-shadow: var(--shadow);
+    margin: 10px 0 16px;
+  }}
+  summary {{
+    cursor: pointer;
+    color: var(--text);
+    font-size: 14px;
+  }}
+  .note {{
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 8px;
+  }}
+  .grid {{
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }}
+  @media (max-width: 1200px) {{
+    .grid {{ grid-template-columns: 1fr; }}
+  }}
+  .col {{
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    min-height: 60vh;
+    display: flex;
+    flex-direction: column;
+  }}
+  .colhead {{
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+  }}
+  .model {{
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: .2px;
+  }}
+  .meta {{
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    color: var(--muted);
+    font-size: 12px;
+    overflow: hidden;
+  }}
+  .pill {{
+    background: var(--pill);
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }}
+  .path {{
+    opacity: .9;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 240px;
+  }}
+  .content {{
+    padding: 14px;
+    overflow: auto;
+  }}
+  .content h1, .content h2, .content h3 {{
+    margin-top: 14px;
+    margin-bottom: 8px;
+  }}
+  .content h2 {{
+    font-size: 16px;
+    border-bottom: 1px dashed var(--border);
+    padding-bottom: 6px;
+  }}
+  .content h3 {{
+    font-size: 14px;
+  }}
+  .content p, .content li {{
+    line-height: 1.35;
+    font-size: 13.5px;
+    color: var(--text);
+  }}
+  .content code {{
+    background: rgba(255,255,255,.06);
+    border: 1px solid var(--border);
+    padding: 0 4px;
+    border-radius: 6px;
+  }}
+  .content pre.pre {{
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--border);
+    padding: 10px 12px;
+    border-radius: 12px;
+    overflow: auto;
+    font-size: 12.5px;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }}
+  .content table {{
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 12.5px;
+  }}
+  .content th, .content td {{
+    border: 1px solid var(--border);
+    padding: 6px 8px;
+    vertical-align: top;
+  }}
+  .prompt {{
+    margin-top: 10px;
+  }}
+  .topbar {{
+    display:flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: baseline;
+  }}
+  .btnrow {{
+    display:flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }}
+  .btn {{
+    background: rgba(255,255,255,.06);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }}
+  .btn:hover {{
+    border-color: rgba(255,255,255,.24);
+  }}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div>
+        <h1>{html.escape(title)}</h1>
+        <div class="sub">Generated {html.escape(now)} • Source: {html.escape(str(run_dir))}</div>
+      </div>
+      <div class="btnrow">
+        <button class="btn" onclick="window.print()">Print</button>
+        <button class="btn" onclick="document.querySelectorAll('.content').forEach(c=>c.scrollTop=0)">Scroll to top</button>
+      </div>
+    </div>
+
+    {prompt_html}
+
+    <div class="grid">
+      {cols_html}
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+    out_path.write_text(html_doc, encoding="utf-8")
+    print(f"Saved HTML: {out_path}")
+
+    if args.open:
+        # Use xdg-open if available
+        os.system(f'xdg-open "{out_path}" >/dev/null 2>&1 &')
+
+if __name__ == "__main__":
+    main()

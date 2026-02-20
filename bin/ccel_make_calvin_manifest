@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IN="${1:-$HOME/FineTuningAI/tmp/calvin_commentaries.xml}"
+OUT="${2:-$HOME/FineTuningAI/manifests/ccel_calvin_commentaries_urls.tsv}"
+
+mkdir -p "$(dirname "$OUT")"
+
+python3 - "$IN" "$OUT" <<'PY'
+import re, sys, pathlib
+
+inp = pathlib.Path(sys.argv[1])
+outp = pathlib.Path(sys.argv[2])
+
+txt = inp.read_text(encoding="utf-8", errors="replace")
+
+# Extract ThML <ref ... target="..."> links robustly (no full XML parse needed)
+targets = re.findall(r'<ref\b[^>]*\btarget="([^"]+)"', txt)
+
+def to_abs(t: str) -> str:
+    t = t.strip()
+    if t.startswith("http://") or t.startswith("https://"):
+        return t
+    if t.startswith("/"):
+        return "https://ccel.org" + t
+    # Most CCEL internal targets are relative like "calvin/xxxx" or "c/calvin/xxxx"
+    # Prefer treating them as CCEL paths under /ccel/
+    if t.startswith("ccel/"):
+        return "https://ccel.org/" + t
+    # If it's like "calvin/xxx" assume /ccel/c/calvin/xxx
+    return "https://ccel.org/ccel/c/calvin/" + t
+
+lines = []
+seen = set()
+
+for t in targets:
+    url = to_abs(t)
+
+    # Build a sane output filename from the URL tail
+    tail = url.split("/")[-1]
+    # If no extension, assume .xml (ThML)
+    if "." not in tail:
+        tail = tail + ".xml"
+
+    rel = f"Commentaries/Calvin/{tail}"
+
+    key = (url, rel)
+    if key in seen:
+        continue
+    seen.add(key)
+    lines.append((url, rel))
+
+outp.write_text(
+    "# URL<TAB>relative/path/filename\n" +
+    "\n".join(f"{u}\t{r}" for u, r in lines) +
+    "\n",
+    encoding="utf-8"
+)
+
+print(f"Extracted {len(lines)} targets -> {outp}")
+# Print a small sample so user can eyeball
+for u, r in lines[:15]:
+    print(" ", u, "->", r)
+PY

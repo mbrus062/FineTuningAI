@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+
+OUT="$HOME/FineTuningAI/AI_INVENTORY.md"
+
+echo "# AI System Inventory" > "$OUT"
+echo "Generated: $(date)" >> "$OUT"
+echo >> "$OUT"
+
+echo "## Host / OS" >> "$OUT"
+uname -a >> "$OUT"
+echo >> "$OUT"
+
+echo "## Disk / Mounts" >> "$OUT"
+df -h >> "$OUT"
+echo >> "$OUT"
+
+echo
+echo "## Block Devices (lsblk)"
+lsblk -o NAME,SIZE,MODEL,SERIAL,TRAN,FSTYPE,FSVER,LABEL,UUID,MOUNTPOINTS
+
+echo
+echo "## Filesystem Signatures (blkid)"
+sudo blkid || true
+
+echo "## GPU" >> "$OUT"
+command -v nvidia-smi >/dev/null && nvidia-smi >> "$OUT" || echo "No NVIDIA GPU detected" >> "$OUT"
+echo >> "$OUT"
+
+echo "## Python" >> "$OUT"
+python3 --version >> "$OUT" 2>&1
+pip3 --version >> "$OUT" 2>&1
+echo >> "$OUT"
+
+echo "## Virtual Environments" >> "$OUT"
+find "$HOME" -type d -name "*venv*" 2>/dev/null >> "$OUT"
+echo >> "$OUT"
+
+echo "## Ollama Models" >> "$OUT"
+command -v ollama >/dev/null && ollama list >> "$OUT" || echo "Ollama not installed" >> "$OUT"
+echo >> "$OUT"
+
+echo "## AI Corpus" >> "$OUT"
+[ -d "$HOME/ai_corpus" ] && du -sh "$HOME/ai_corpus" >> "$OUT"
+echo >> "$OUT"
+
+echo "Inventory written to $OUT"

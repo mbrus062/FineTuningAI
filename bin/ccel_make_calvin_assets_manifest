@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+INDEX_XML="${1:-$HOME/FineTuningAI/tmp/calvin_commentaries.xml}"
+OUT_TSV="${2:-$HOME/FineTuningAI/manifests/ccel_calvin_assets_urls.tsv}"
+
+mkdir -p "$(dirname "$OUT_TSV")"
+
+python3 - "$INDEX_XML" "$OUT_TSV" <<'PY'
+import re, sys, pathlib, urllib.request
+
+index_path = pathlib.Path(sys.argv[1])
+out_path   = pathlib.Path(sys.argv[2])
+base = "https://ccel.org"
+
+index_txt = index_path.read_text(encoding="utf-8", errors="replace")
+calcom = sorted(set(re.findall(r'href="(/ccel/calvin/calcom\d+\.html)"', index_txt)))
+
+def fetch(url: str) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return r.read().decode("utf-8", "replace")
+
+def normalize(u: str, page_url: str) -> str:
+    u = u.strip()
+    if u.startswith("http://") or u.startswith("https://"):
+        return u
+    if u.startswith("/"):
+        return base + u
+    # relative to the page's directory
+    # Calvin pages live under /ccel/calvin/
+    return base + "/ccel/calvin/" + u.lstrip("./")
+
+def pick_asset(page_url: str, html: str) -> str | None:
+    # collect links from href= and src=
+    raw = []
+    raw += re.findall(r'href="([^"]+)"', html)
+    raw += re.findall(r"href='([^']+)'", html)
+    raw += re.findall(r'src="([^"]+)"', html)
+    raw += re.findall(r"src='([^']+)'", html)
+
+    links = [normalize(u, page_url) for u in raw]
+
+    # Prefer cache text, then xml, then cache pdf
+    for u in links:
+        if "/cache/" in u and u.lower().endswith(".txt"):
+            return u
+    for u in links:
+        if u.lower().endswith(".xml"):
+            return u
+    for u in links:
+        if "/cache/" in u and u.lower().endswith(".pdf"):
+            return u
+
+    # Sometimes CCEL uses plain .txt without /cache/
+    for u in links:
+        if u.lower().endswith(".txt"):
+            return u
+
+    return None
+
+lines = []
+miss = []
+
+for rel in calcom:
+    page_url = base + rel
+    try:
+        html = fetch(page_url)
+    except Exception as e:
+        miss.append((page_url, f"fetch-failed: {e}"))
+        continue
+
+    asset = pick_asset(page_url, html)
+    if not asset:
+        miss.append((page_url, "no-asset-link-found"))
+        continue
+
+    tag = rel.split("/")[-1].replace(".html","")  # calcomNN
+    tail = asset.split("/")[-1]
+    relout = f"Commentaries/Calvin/{tag}__{tail}"
+
+    lines.append((asset, relout))
+
+out_path.write_text(
+    "# URL<TAB>relative/path/filename\n" +
+    "\n".join(f"{u}\t{r}" for u, r in lines) +
+    "\n",
+    encoding="utf-8"
+)
+
+print(f"Calcom pages found: {len(calcom)}")
+print(f"Assets extracted  : {len(lines)}")
+print(f"Missing/unclear   : {len(miss)}")
+print("Manifest written  :", out_path)
+
+print("\nSample assets:")
+for u,r in lines[:15]:
+    print(" ", u, "->", r)
+
+if miss:
+    print("\nFirst 10 misses:")
+    for u, why in miss[:10]:
+        print(" ", u, "=>", why)
+PY

@@ -1,0 +1,351 @@
+#!/usr/bin/env python3
+"""
+Build a master corpus index for /ai_data/ebooks.
+
+Outputs:
+  - SQLite DB: /ai_data/ebooks/_corpus_index/corpus_index.sqlite
+  - TSV export: /ai_data/ebooks/_corpus_index/corpus_index.tsv
+
+Design goals:
+  - RAW/CLEAN/DIGESTED workflow (status tag)
+  - stable identity by sha256
+  - minimal assumptions about metadata (title/author are "guesses")
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import re
+import sqlite3
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Optional, Tuple
+
+DEFAULT_ROOT = Path("/ai_data/ebooks")
+DEFAULT_OUTDIR = DEFAULT_ROOT / "_corpus_index"
+
+DEFAULT_EXTS = {
+    ".pdf", ".epub", ".txt", ".xml", ".html", ".xhtml", ".htm",
+    ".djvu", ".rtf", ".md", ".json",
+}
+
+DEFAULT_EXCLUDE_DIRS = {
+    ".git",
+    "__pycache__",
+    "_corpus_index",
+    "_imports",
+    "_digested",
+    "_digested_json",
+    "_text_unified",
+    "Acquisition",  # if you prefer to index these too, remove it
+    "Quarantine_Archive",
+}
+
+STATUS_RAW = "RAW"
+STATUS_CLEAN = "CLEAN"
+STATUS_DIGESTED = "DIGESTED"
+
+# ---------- helpers ----------
+
+def sha256_file(path: Path, buf_size: int = 1024 * 1024) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        while True:
+            b = f.read(buf_size)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest()
+
+def safe_stat(path: Path) -> Tuple[int, float]:
+    st = path.stat()
+    return st.st_size, st.st_mtime
+
+def should_skip_dir(dirpath: Path, exclude_dirs: set[str]) -> bool:
+    return dirpath.name in exclude_dirs
+
+def normalize_spaces(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip()
+
+def guess_author_title_from_filename(name: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Very conservative guesser. You can improve later.
+    Tries patterns like:
+      "Author - Title.ext"
+      "Title - Author.ext"
+      "Author_Title.ext"
+    """
+    base = re.sub(r"\.[^.]+$", "", name)
+
+    # Common separators
+    seps = [" - ", " — ", "_-_", "__", " – "]
+    for sep in seps:
+        if sep in base:
+            a, b = base.split(sep, 1)
+            a = normalize_spaces(a.replace("_", " "))
+            b = normalize_spaces(b.replace("_", " "))
+            # Heuristic: if first chunk looks like a person name (2-4 words), treat as author
+            if 1 <= len(a.split()) <= 4 and any(ch.isalpha() for ch in a):
+                return a, b
+            if 1 <= len(b.split()) <= 4 and any(ch.isalpha() for ch in b):
+                return b, a
+            return None, normalize_spaces(base.replace("_", " "))
+
+    # Underscore split fallback
+    if "_" in base:
+        parts = [p for p in base.split("_") if p]
+        if 2 <= len(parts) <= 6:
+            # if last 1-3 tokens look like a name, guess that as author
+            tail = " ".join(parts[-3:])
+            head = " ".join(parts[:-3]) if len(parts) > 3 else " ".join(parts[:-1])
+            tail = normalize_spaces(tail)
+            head = normalize_spaces(head)
+            if head and tail and 1 <= len(tail.split()) <= 4:
+                return tail, head
+    return None, normalize_spaces(base.replace("_", " "))
+
+def classify_tradition_from_path(path: Path) -> Optional[str]:
+    p = str(path).lower()
+    if "/jewish/" in p:
+        return "Jewish"
+    if "/churchfathers/" in p or "patristic" in p or "/patristics" in p:
+        return "Patristic"
+    if "/christian/reformation" in p or "/reformation" in p:
+        return "Reformation"
+    if "/reference/" in p:
+        return "Reference"
+    return None
+
+def classify_language_from_path(path: Path) -> Optional[str]:
+    p = str(path)
+    # Sefaria export structure includes .../English/ .../Hebrew/
+    if "/English/" in p:
+        return "English"
+    if "/Hebrew/" in p:
+        return "Hebrew"
+    if "/Greek/" in p:
+        return "Greek"
+    if "/Latin/" in p:
+        return "Latin"
+    return None
+
+@dataclass
+class Row:
+    sha256: str
+    sha256_prefix: str
+    rel_path: str
+    abs_path: str
+    ext: str
+    size_bytes: int
+    mtime_epoch: float
+    status: str
+    title_guess: Optional[str]
+    author_guess: Optional[str]
+    tradition_guess: Optional[str]
+    language_guess: Optional[str]
+    source_guess: Optional[str]
+    notes: Optional[str]
+    created_utc: int
+
+# ---------- DB ----------
+
+SCHEMA_SQL = """
+PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
+
+CREATE TABLE IF NOT EXISTS corpus_items (
+  sha256 TEXT PRIMARY KEY,
+  sha256_prefix TEXT NOT NULL,
+  rel_path TEXT NOT NULL,
+  abs_path TEXT NOT NULL,
+  ext TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  mtime_epoch REAL NOT NULL,
+
+  status TEXT NOT NULL DEFAULT 'RAW',       -- RAW/CLEAN/DIGESTED
+  title_guess TEXT,
+  author_guess TEXT,
+  tradition_guess TEXT,
+  language_guess TEXT,
+  source_guess TEXT,
+  notes TEXT,
+
+  created_utc INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_corpus_rel_path ON corpus_items(rel_path);
+CREATE INDEX IF NOT EXISTS idx_corpus_status   ON corpus_items(status);
+CREATE INDEX IF NOT EXISTS idx_corpus_ext      ON corpus_items(ext);
+CREATE INDEX IF NOT EXISTS idx_corpus_author   ON corpus_items(author_guess);
+CREATE INDEX IF NOT EXISTS idx_corpus_title    ON corpus_items(title_guess);
+"""
+
+UPSERT_SQL = """
+INSERT INTO corpus_items (
+  sha256, sha256_prefix, rel_path, abs_path, ext,
+  size_bytes, mtime_epoch,
+  status, title_guess, author_guess, tradition_guess, language_guess, source_guess, notes,
+  created_utc
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(sha256) DO UPDATE SET
+  rel_path=excluded.rel_path,
+  abs_path=excluded.abs_path,
+  ext=excluded.ext,
+  size_bytes=excluded.size_bytes,
+  mtime_epoch=excluded.mtime_epoch
+;
+"""
+
+# ---------- scan ----------
+
+def iter_files(root: Path, exts: set[str], exclude_dirs: set[str]) -> Iterable[Path]:
+    for dirpath, dirnames, filenames in os.walk(root):
+        dp = Path(dirpath)
+
+        # prune excluded dirs
+        dirnames[:] = [d for d in dirnames if d not in exclude_dirs and not d.startswith(".")]
+
+        # also skip if *this* directory is excluded
+        if should_skip_dir(dp, exclude_dirs):
+            continue
+
+        for fn in filenames:
+            p = dp / fn
+            if not p.is_file():
+                continue
+            ext = p.suffix.lower()
+            if ext in exts:
+                yield p
+
+def build_rows(paths: Iterable[Path], root: Path) -> Iterable[Row]:
+    created_utc = int(time.time())
+    for p in paths:
+        try:
+            size, mtime = safe_stat(p)
+        except Exception as e:
+            print(f"WARN: stat failed: {p} ({e})", file=sys.stderr)
+            continue
+
+        try:
+            s = sha256_file(p)
+        except Exception as e:
+            print(f"WARN: sha256 failed: {p} ({e})", file=sys.stderr)
+            continue
+
+        rel = str(p.relative_to(root))
+        ext = p.suffix.lower()
+
+        author_guess, title_guess = guess_author_title_from_filename(p.name)
+        tradition_guess = classify_tradition_from_path(p)
+        language_guess = classify_language_from_path(p)
+
+        # conservative source guess
+        source_guess = None
+        pl = str(p).lower()
+        if "sefaria_export" in pl or "sefaria-export" in pl:
+            source_guess = "Sefaria Export"
+        elif "ccel" in pl:
+            source_guess = "CCEL"
+        elif "archive.org" in pl or "_djvu" in pl:
+            source_guess = "Internet Archive (OCR)"
+        elif "gutenberg" in pl:
+            source_guess = "Project Gutenberg"
+
+        yield Row(
+            sha256=s,
+            sha256_prefix=s[:12],
+            rel_path=rel,
+            abs_path=str(p),
+            ext=ext,
+            size_bytes=size,
+            mtime_epoch=mtime,
+            status=STATUS_RAW,
+            title_guess=title_guess,
+            author_guess=author_guess,
+            tradition_guess=tradition_guess,
+            language_guess=language_guess,
+            source_guess=source_guess,
+            notes=None,
+            created_utc=created_utc,
+        )
+
+def write_tsv(db_path: Path, tsv_path: Path) -> None:
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute("SELECT * FROM corpus_items ORDER BY rel_path;")
+    cols = [d[0] for d in cur.description]
+
+    tsv_path.parent.mkdir(parents=True, exist_ok=True)
+    with tsv_path.open("w", encoding="utf-8", newline="\n") as f:
+        f.write("\t".join(cols) + "\n")
+        for row in cur.fetchall():
+            # convert None -> ""
+            out = [("" if v is None else str(v)) for v in row]
+            f.write("\t".join(out) + "\n")
+
+    con.close()
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--root", default=str(DEFAULT_ROOT), help="Root directory to scan (default: /ai_data/ebooks)")
+    ap.add_argument("--outdir", default=str(DEFAULT_OUTDIR), help="Output directory for index files")
+    ap.add_argument("--include-ext", action="append", default=[], help="Add extra file extension to include, e.g. .zip")
+    ap.add_argument("--exclude-dir", action="append", default=[], help="Add dir name to exclude from scan")
+    ap.add_argument("--no-exclude-defaults", action="store_true", help="Do not exclude default dirs")
+    args = ap.parse_args()
+
+    root = Path(args.root)
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    exts = set(DEFAULT_EXTS) | {e.lower() if e.startswith(".") else f".{e.lower()}" for e in args.include_ext}
+
+    if args.no_exclude_defaults:
+        exclude_dirs = set(args.exclude_dir)
+    else:
+        exclude_dirs = set(DEFAULT_EXCLUDE_DIRS) | set(args.exclude_dir)
+
+    db_path = outdir / "corpus_index.sqlite"
+    tsv_path = outdir / "corpus_index.tsv"
+
+    con = sqlite3.connect(db_path)
+    con.executescript(SCHEMA_SQL)
+
+    cur = con.cursor()
+
+    files = list(iter_files(root, exts, exclude_dirs))
+    print(f"SCAN: {len(files)} candidate files under {root}")
+
+    n = 0
+    for row in build_rows(files, root):
+        cur.execute(
+            UPSERT_SQL,
+            (
+                row.sha256, row.sha256_prefix, row.rel_path, row.abs_path, row.ext,
+                row.size_bytes, row.mtime_epoch,
+                row.status, row.title_guess, row.author_guess,
+                row.tradition_guess, row.language_guess, row.source_guess, row.notes,
+                row.created_utc,
+            ),
+        )
+        n += 1
+        if n % 200 == 0:
+            con.commit()
+            print(f"  indexed: {n}")
+
+    con.commit()
+    con.close()
+
+    write_tsv(db_path, tsv_path)
+
+    print(f"DONE: indexed {n} files")
+    print(f"DB:   {db_path}")
+    print(f"TSV:  {tsv_path}")
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())

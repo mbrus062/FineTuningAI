@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# tri_ollama: run the same prompt against 3 models, each in its own GNOME Terminal window.
+# Windows remain open afterward for printing/review, but the model run is single-shot (not interactive).
+#
+# Usage:
+#   tri_ollama "your prompt here"
+#   tri_ollama -f /path/to/prompt.txt
+#
+# Optional:
+#   TRI_MODELS="enoch qwen2.5:14b gemma3:27b" tri_ollama "..."
+#   TRI_NOHUP=1 tri_ollama "..."   (detaches fully; usually not needed)
+
+DEFAULT_MODELS=("enoch-md" "qwen-md" "gemma-md")
+
+# Allow override via env var TRI_MODELS (space-separated list)
+if [[ -n "${TRI_MODELS:-}" ]]; then
+  # shellcheck disable=SC2206
+  MODELS=(${TRI_MODELS})
+else
+  MODELS=("${DEFAULT_MODELS[@]}")
+fi
+
+# --- Get prompt ---
+PROMPT=""
+if [[ "${1:-}" == "-f" ]]; then
+  [[ -n "${2:-}" ]] || { echo "Missing file path after -f"; exit 1; }
+  PROMPT="$(cat "$2")"
+else
+  PROMPT="${*:-}"
+fi
+[[ -n "$PROMPT" ]] || { echo "Provide a prompt, or use -f prompt.txt"; exit 1; }
+# --- Formatting guardrail (auto-prepended) ---
+FORMAT_GUARD=$'FORMAT REQUIREMENTS:\n'\
+$'- Output clean Markdown.\n'\
+$'- Use headings (##), numbered lists, and bullet points.\n'\
+$'- No decorative separators (***, ---) unless essential.\n'\
+$'- Keep lines under ~90 characters.\n'\
+$'- Do not narrate hidden reasoning; provide final answer only.\n'
+
+PROMPT="${FORMAT_GUARD}"$'\n'"${PROMPT}"
+
+# --- Log directory ---
+TS="$(date +%Y%m%d_%H%M%S)"
+LOGDIR="$HOME/FineTuningAI/tri_runs/$TS"
+mkdir -p "$LOGDIR"
+
+# --- Helper: if a preferred model isn't installed, fall back gracefully ---
+has_model() {
+  ollama list 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$1"
+}
+
+# DeepSeek wrapper fallback (if deepseek-clean doesn't exist, use deepseek-r1:32b)
+resolved_models=()
+for m in "${MODELS[@]}"; do
+  if [[ "$m" == "deepseek-clean" ]] && ! has_model "deepseek-clean"; then
+    resolved_models+=("deepseek-r1:32b")
+  else
+    resolved_models+=("$m")
+  fi
+done
+
+# --- Launch one window per model ---
+for M in "${resolved_models[@]}"; do
+  SAFE_NAME="$(echo "$M" | tr '/:.' '___')"
+  OUTFILE="$LOGDIR/${SAFE_NAME}.txt"
+
+  export TRI_MODEL="$M"
+  export TRI_PROMPT="$PROMPT"
+  export TRI_OUTFILE="$OUTFILE"
+  DONEFILE="$LOGDIR/${SAFE_NAME}.done"
+  export TRI_DONEFILE="$DONEFILE"
+
+
+  LAUNCH_CMD=$(
+    cat <<'EOF'
+echo "=== Model: $TRI_MODEL ==="
+echo "=== Time:  $(date) ==="
+echo
+echo "PROMPT:"
+printf "%s\n" "$TRI_PROMPT"
+echo
+echo "--- RESPONSE ---"
+echo
+
+start=$(date +%s)
+
+ollama run "$TRI_MODEL" "$TRI_PROMPT" | tee "$TRI_OUTFILE"
+rc=${PIPESTATUS[0]}
+
+end=$(date +%s)
+elapsed=$((end-start))
+
+echo
+echo "Exit code: $rc"
+echo "Elapsed:   ${elapsed}s"
+echo "Saved:     $TRI_OUTFILE"
+echo
+
+echo "----- Pretty view (Markdown rendered by glow) -----"
+glow -w 120 "$TRI_OUTFILE" || true
+
+
+
+echo
+echo "Quick actions:"
+echo "  Copy to clipboard:  xclip -selection clipboard < \"$TRI_OUTFILE\""
+echo "  Open in editor:     gedit \"$TRI_OUTFILE\" &"
+
+echo
+echo "Window left open for review/printing. Run tri_ollama again for a new query."
+date > "$TRI_DONEFILE"
+exec bash
+EOF
+  )
+
+
+  if [[ "${TRI_NOHUP:-0}" == "1" ]]; then
+    nohup gnome-terminal --title="LLM: $M" -- bash -lc "$LAUNCH_CMD" >/dev/null 2>&1 &
+  else
+    gnome-terminal --title="LLM: $M" -- bash -lc "$LAUNCH_CMD" >/dev/null 2>&1 &
+  fi
+done
+# Wait for all models to finish (done markers)
+for _ in {1..240}; do
+  ok=1
+  for MM in "${resolved_models[@]}"; do
+    SAFE_NAME="$(echo "$MM" | tr '/:.' '___')"
+    D="$LOGDIR/${SAFE_NAME}.done"
+    [[ -f "$D" ]] || ok=0
+  done
+  [[ "$ok" == "1" ]] && break
+  sleep 0.25
+done
+
+
+
+echo "Launched ${#resolved_models[@]} windows."
+echo "Logs: $LOGDIR"
+echo
+
+HTML_ORDER="gemma-md,qwen-md,enoch-md"
+REPORT="$LOGDIR/tri_compare.html"
+REPORTER="$HOME/FineTuningAI/bin/tri_html_report"
+
+if [[ -x "$REPORTER" ]]; then
+  echo "Generating HTML comparison..."
+  "$REPORTER" "$LOGDIR" --open --order "$HTML_ORDER"
+  # In case --open doesn't fire (desktop/GUI quirks), also try xdg-open directly:
+  if [[ -f "$REPORT" ]] && command -v xdg-open >/dev/null 2>&1; then
+    nohup xdg-open "$REPORT" >/dev/null 2>&1 &
+  fi
+else
+  echo "✗ tri_html_report not found at: $REPORTER"
+fi
+
+echo

@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+import argparse
+import csv
+import re
+from pathlib import Path
+from datetime import datetime
+
+DEFAULT_ROOT = "/ai_data/ebooks"
+DEFAULT_OUT = str(Path.home() / "FineTuningAI" / "inventory" / "ebooks_inventory.csv")
+
+CHECKLIST_DIR = Path.home() / "FineTuningAI" / "inventory" / "checklists"
+DEFAULT_CHECKLISTS = sorted([str(p) for p in CHECKLIST_DIR.glob("*.txt")])
+
+
+DEFAULT_WISHLIST_PATH = str(Path.home() / "FineTuningAI" / "inventory" / "ebooks_wishlist.txt")
+
+EXTS = {".pdf", ".epub", ".mobi", ".djvu", ".txt", ".docx", ".odt", ".htm", ".html", ".rtf"}
+
+def normalize(s: str) -> str:
+    s = s.lower()
+    s = s.replace("&", "and")
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def iter_files(root: Path):
+    for p in root.rglob("*"):
+        if p.is_file() and p.suffix.lower() in EXTS:
+            yield p
+
+def guess_collection(path: Path) -> str:
+    parts = [normalize(x) for x in path.parts]
+    if any("harvard classics" in x or x == "harvard_classics" or x == "harvard classics" for x in parts):
+        return "Harvard Classics"
+    if any(x == "download_gutenberg" or "gutenberg" in x for x in parts):
+        return "Gutenberg dump"
+    if any(x == "patristics_epub" or x in ("anf", "npnf") for x in parts):
+        return "Patristics (ANF/NP-NF)"
+    if any(x == "egw" for x in parts):
+        return "EGW"
+    return "General"
+
+def load_pairs_file(path: Path):
+    """
+    Reads lines like:
+      key|Label
+    Ignores blanks and comments (#...).
+    Returns list of (key, label).
+    """
+    items = []
+    if not path.exists():
+        return items
+    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "|" in line:
+            k, v = line.split("|", 1)
+            items.append((k.strip(), v.strip()))
+        else:
+            # allow "key" only
+            items.append((line, line))
+    return items
+
+def load_checklist(path: Path):
+    """
+    Reads lines like:
+      Author|Title
+    Ignores blanks and comments (#...).
+    Returns list of (author, title).
+    """
+    items = []
+    if not path.exists():
+        return items
+    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "|" not in line:
+            continue
+        author, title = line.split("|", 1)
+        items.append((author.strip(), title.strip()))
+    return items
+
+def wishlist_hits(files_norm, pairs):
+    """
+    pairs: list of (key, label)
+    files_norm: list of (Path, normalized_path_string)
+    """
+    out = []
+    for key, label in pairs:
+        k = normalize(key)
+        hits = [str(p) for (p, s) in files_norm if k in s]
+        out.append((label, key, len(hits), hits[:25]))
+    return out
+
+def checklist_status(files_norm, author, title):
+    """
+    Supports multiple title aliases separated by ';' in the checklist file.
+
+    Heuristic status:
+      - PRESENT_PRIMARY: author matches AND any title alias matches path/name
+      - PRESENT_AUTHOR_ONLY: author matches but no title alias matches
+      - MISSING: no author matches
+    """
+    a = normalize(author)
+
+    # title can be: "Foo;Bar;Baz"
+    aliases = [normalize(x) for x in title.split(";")] if title else []
+    aliases = [x for x in aliases if x]
+
+    author_hits = []
+    primary_hits = []
+
+    for (p, s) in files_norm:
+        if a in s:
+            author_hits.append(str(p))
+            if aliases and any(t in s for t in aliases):
+                primary_hits.append(str(p))
+
+    if primary_hits:
+        return "PRESENT_PRIMARY", primary_hits[:10]
+    if author_hits:
+        return "PRESENT_AUTHOR_ONLY", author_hits[:10]
+    return "MISSING", []
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Scan ebooks and emit CSV inventory + wishlist + checklist reports")
+    ap.add_argument("--root", default=DEFAULT_ROOT, help=f"Root directory to scan (default: {DEFAULT_ROOT})")
+    ap.add_argument("--out", default=DEFAULT_OUT, help=f"CSV output path (default: {DEFAULT_OUT})")
+    ap.add_argument("--wishlist", default=DEFAULT_WISHLIST_PATH, help="Wishlist file path (key|Label per line)")
+    ap.add_argument("--wishlist-out", default=str(Path.home() / "FineTuningAI" / "inventory" / "ebooks_wishlist_report.txt"),
+                    help="Wishlist report output path")
+    ap.add_argument("--checklists", nargs="*", default=DEFAULT_CHECKLISTS,
+                    help="Checklist files (Author|Title per line). Defaults to Penguin + Great Books files.")
+    ap.add_argument("--checklist-out", default=str(Path.home() / "FineTuningAI" / "inventory" / "ebooks_checklist_report.txt"),
+                    help="Checklist status report output path")
+    args = ap.parse_args()
+
+    root = Path(args.root)
+    if not root.exists():
+        raise SystemExit(f"Root not found: {root}")
+
+    files = sorted(iter_files(root))
+    files_norm = [(p, normalize(str(p))) for p in files]
+
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now().isoformat(timespec="seconds")
+
+    # 1) CSV inventory of all ebook-like files
+    with out_path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["scanned_at", "collection", "ext", "size_bytes", "rel_path", "filename"])
+        for p in files:
+            try:
+                st = p.stat()
+                w.writerow([
+                    now,
+                    guess_collection(p),
+                    p.suffix.lower(),
+                    st.st_size,
+                    str(p.relative_to(root)),
+                    p.name
+                ])
+            except FileNotFoundError:
+                continue
+
+    # 2) Wishlist report (key-based hits)
+    wishlist_path = Path(args.wishlist)
+    wishlist_pairs = load_pairs_file(wishlist_path)
+    hits = wishlist_hits(files_norm, wishlist_pairs)
+
+    report_path = Path(args.wishlist_out)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+
+    wl_lines = []
+    wl_lines.append(f"Wishlist report generated: {now}")
+    wl_lines.append(f"Scanned root: {root}")
+    wl_lines.append(f"Total indexed files: {len(files)}")
+    wl_lines.append(f"Wishlist file: {wishlist_path}")
+    wl_lines.append("")
+    for label, key, count, examples in hits:
+        status = "PRESENT" if count > 0 else "MISSING"
+        wl_lines.append(f"- {label} ({key}): {status} ({count} hit(s))")
+        for ex in examples:
+            wl_lines.append(f"    {ex}")
+        if count > len(examples):
+            wl_lines.append(f"    ... (+{count - len(examples)} more)")
+        wl_lines.append("")
+    report_path.write_text("\n".join(wl_lines), encoding="utf-8")
+
+    # 3) Checklist report (Author|Title matching)
+    checklist_out = Path(args.checklist_out)
+    checklist_out.parent.mkdir(parents=True, exist_ok=True)
+
+    ck_lines = []
+    ck_lines.append(f"Checklist report generated: {now}")
+    ck_lines.append(f"Scanned root: {root}")
+    ck_lines.append(f"Total indexed files: {len(files)}")
+    ck_lines.append("")
+    for ck_file in args.checklists:
+        p = Path(ck_file).expanduser()
+        items = load_checklist(p)
+        ck_lines.append(f"=== CHECKLIST: {p} ===")
+        if not items:
+            ck_lines.append("(No items found or file missing)")
+            ck_lines.append("")
+            continue
+
+        counts = {"PRESENT_PRIMARY": 0, "PRESENT_AUTHOR_ONLY": 0, "MISSING": 0}
+
+        for author, title in items:
+            status, examples = checklist_status(files_norm, author, title)
+            counts[status] += 1
+            ck_lines.append(f"- {author} | {title} : {status}")
+            for ex in examples:
+                ck_lines.append(f"    {ex}")
+        ck_lines.append("")
+        ck_lines.append(f"Summary: PRIMARY={counts['PRESENT_PRIMARY']}  AUTHOR_ONLY={counts['PRESENT_AUTHOR_ONLY']}  MISSING={counts['MISSING']}")
+        ck_lines.append("")
+
+    checklist_out.write_text("\n".join(ck_lines), encoding="utf-8")
+
+    print(f"\n=== INVENTORY SUMMARY ===")
+    print(f"Inventory CSV: {out_path}")
+    print(f"Wishlist report: {report_path}")
+    print(f"Checklist report: {checklist_out}")
+
+    def print_head(path, lines=200):
+        print(f"\n--- {path} (first {lines} lines) ---")
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                for i, line in enumerate(f):
+                    if i >= lines:
+                        print("... (truncated)")
+                        break
+                    print(line.rstrip())
+        except Exception as e:
+            print(f"[Could not read {path}: {e}]")
+
+
+    print_head(checklist_out, lines=200)
+    print_head(report_path, lines=600)
+
+if __name__ == "__main__":
+    main()
+

@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DEST="/ai_data/ebooks/Jewish/Talmud/Rodkinson (1918)"
+INV="$HOME/FineTuningAI/bin/ebook_inventory"
+LOG="$DEST/rodkinson_download.log"
+
+mkdir -p "$DEST"
+echo "=== Rodkinson download run: $(date) ===" | tee -a "$LOG"
+
+# Download Vol 01–20
+for i in $(seq -w 1 20); do
+  out="$DEST/Talmud - Rodkinson - Vol ${i} - 1918.pdf"
+  url="https://archive.org/download/BabylonianTalmudTransMLRodkinsonVol${i}1918/Babylonian%20Talmud%20trans%20M%20L%20Rodkinson%20Vol%20${i}%20-%201918.pdf"
+
+  if [[ -f "$out" ]]; then
+    echo "[SKIP] Vol $i already exists: $out" | tee -a "$LOG"
+    continue
+  fi
+
+  echo "[GET ] Vol $i -> $out" | tee -a "$LOG"
+  # -c lets it resume if interrupted; --tries adds robustness
+  wget -c --tries=5 --timeout=30 -O "$out" "$url" | tee -a "$LOG"
+
+  # Basic sanity: file exists and is not empty
+  if [[ ! -s "$out" ]]; then
+    echo "[FAIL] Vol $i downloaded but file is empty: $out" | tee -a "$LOG"
+    exit 1
+  fi
+
+  # Basic sanity: confirm it at least looks like a PDF
+  if ! head -c 4 "$out" | grep -q "%PDF"; then
+    echo "[WARN] Vol $i does not start with %PDF (might still be ok, but check): $out" | tee -a "$LOG"
+  else
+    echo "[ OK ] Vol $i looks like a PDF" | tee -a "$LOG"
+  fi
+done
+
+echo "=== Download phase complete ===" | tee -a "$LOG"
+
+# Inventory check: confirm ebook_inventory can see Rodkinson files
+echo "=== Running ebook_inventory check ===" | tee -a "$LOG"
+if [[ ! -x "$INV" && ! -f "$INV" ]]; then
+  echo "[FAIL] ebook_inventory not found at: $INV" | tee -a "$LOG"
+  exit 1
+fi
+
+# Run inventory and count Rodkinson hits
+hits="$(python3 "$INV" | grep -i "rodkinson" | wc -l | tr -d ' ')"
+echo "[INFO] ebook_inventory Rodkinson matches: $hits" | tee -a "$LOG"
+
+# Show what files exist on disk
+echo "=== Files on disk ===" | tee -a "$LOG"
+ls -1 "$DEST" | sed 's/^/  /' | tee -a "$LOG"
+
+echo "=== Done ===" | tee -a "$LOG"

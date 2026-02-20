@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MANIFEST="$HOME/FineTuningAI/manifests/waveA_jewish_stage1.tsv"
+ROOT="/ai_data/ebooks/Jewish"
+
+mkdir -p "$ROOT"
+
+# Read line-by-line; tolerate tabs OR spaces.
+while IFS= read -r line; do
+  # skip blanks/comments
+  [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+
+  # Split: first whitespace-delimited token is IAID; remainder is RELDIR
+  IAID="${line%%[[:space:]]*}"
+  RELDIR="${line#"$IAID"}"
+  RELDIR="${RELDIR#"${RELDIR%%[![:space:]]*}"}"   # trim leading whitespace
+
+  if [[ -z "$IAID" || -z "$RELDIR" ]]; then
+    echo "!! Bad manifest line (need: <IAID><space><reldir>): $line" >&2
+    continue
+  fi
+
+  OUTDIR="$ROOT/$RELDIR/PDF"
+  echo
+  echo "=== Fetching: $IAID ==="
+  echo "→ $OUTDIR"
+
+  mkdir -p "$OUTDIR"
+
+  ia_pdf_fetch_verify "$IAID" "$OUTDIR" || {
+    echo "!! WARNING: $IAID had issues — continuing" >&2
+  }
+
+done < "$MANIFEST"
+
+echo
+echo "Wave A acquisition complete."

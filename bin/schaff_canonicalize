@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE="${1:-/ai_data/ebooks/History/History_of_the_Christian_Church_Philip_Schaff}"
+CANON="$BASE/Canonical"
+ALT="$BASE/Alternates"
+REP="$BASE/_reports"
+
+mkdir -p "$CANON" "$ALT" "$REP"
+
+command -v pdftotext >/dev/null 2>&1 || { echo "pdftotext required (poppler-utils)"; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 1; }
+
+python3 - "$BASE" "$CANON" "$ALT" "$REP" <<'PY'
+import os, re, sys, shutil, subprocess
+from pathlib import Path
+
+base = Path(sys.argv[1])
+canon = Path(sys.argv[2])
+alt = Path(sys.argv[3])
+rep = Path(sys.argv[4])
+
+# Collect PDFs (ignore *_bw.pdf by default, but keep them as alternates)
+pdfs = sorted([p for p in base.rglob("*.pdf") if p.is_file()])
+
+# Roman numeral handling
+roman_map = {"I":1,"II":2,"III":3,"IV":4,"V":5,"VI":6,"VII":7,"VIII":8,"IX":9,"X":10}
+vol_re = re.compile(r"\bVOLUME\s+([IVX]+)\b", re.IGNORECASE)
+
+def first_page_text(pdf: Path) -> str:
+    try:
+        out = subprocess.check_output(
+            ["pdftotext", "-f", "1", "-l", "1", str(pdf), "-"],
+            stderr=subprocess.DEVNULL,
+            timeout=25
+        )
+        txt = out.decode("utf-8", "replace")
+        txt = txt.replace("\r","")
+        return "\n".join(txt.splitlines()[:80])
+    except Exception:
+        return ""
+
+def score(pdf: Path) -> tuple:
+    """
+    Higher is better.
+    Prefer non-_bw, prefer larger file size.
+    """
+    s = pdf.stat().st_size
+    bw = 1 if pdf.name.lower().endswith("_bw.pdf") else 0
+    return (-(bw), s)
+
+by_vol = {i: [] for i in range(1, 9)}
+unknown = []
+
+for p in pdfs:
+    txt = first_page_text(p)
+    m = vol_re.search(txt)
+    if not m:
+        unknown.append(p)
+        continue
+    rn = m.group(1).upper()
+    v = roman_map.get(rn)
+    if not v or v < 1 or v > 8:
+        unknown.append(p)
+        continue
+    by_vol[v].append((p, txt))
+
+report_lines = []
+report_lines.append(f"BASE: {base}")
+report_lines.append("")
+
+# Choose best candidate per volume and copy into Canonical
+chosen = {}
+for v in range(1, 9):
+    cands = by_vol[v]
+    report_lines.append(f"=== VOLUME {v:02d} ===  candidates: {len(cands)}")
+    if not cands:
+        report_lines.append("  !! NO CANDIDATES FOUND")
+        report_lines.append("")
+        continue
+
+    # rank by score
+    ranked = sorted([p for p,_ in cands], key=score, reverse=True)
+    pick = ranked[0]
+    chosen[v] = pick
+
+    dest_dir = canon / f"Vol_{v:02d}" / "PDF"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / pick.name
+
+    # copy (not move) to keep original structure intact
+    shutil.copy2(pick, dest)
+
+    report_lines.append(f"  PICK: {pick}")
+    report_lines.append(f"  SIZE: {pick.stat().st_size}")
+    report_lines.append("  TOP LINES:")
+    top = first_page_text(pick).splitlines()[:12]
+    for line in top:
+        report_lines.append(f"    {line}")
+    report_lines.append("")
+
+# Everything not chosen goes to Alternates (as a mirrored copy list; we don't delete)
+alt_list = []
+for p in pdfs:
+    if any(p == c for c in chosen.values()):
+        continue
+    alt_list.append(p)
+
+report_lines.append("=== ALTERNATES (not chosen) ===")
+report_lines.append(f"Count: {len(alt_list)}")
+for p in alt_list[:200]:
+    report_lines.append(f"  {p}")
+
+report_lines.append("")
+report_lines.append("=== UNKNOWN (no VOLUME match on page 1) ===")
+report_lines.append(f"Count: {len(unknown)}")
+for p in unknown[:200]:
+    report_lines.append(f"  {p}")
+
+(rep / "schaff_canonicalize_report.txt").write_text("\n".join(report_lines), encoding="utf-8")
+
+print("Wrote:", rep / "schaff_canonicalize_report.txt")
+print("Canonical copied to:", canon)
+PY

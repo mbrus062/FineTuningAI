@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+  echo "Usage: ccel_fetch <manifest.txt> <output_root>"
+  exit 1
+fi
+
+MANIFEST="$1"
+ROOT="$2"
+
+mkdir -p "$ROOT"
+
+while IFS= read -r entry; do
+  [[ -z "$entry" || "$entry" =~ ^# ]] && continue
+
+  author="${entry%%/*}"
+  work="${entry##*/}"
+
+  letter="${author:0:1}"
+  url="https://ccel.org/ccel/${letter}/${author}/${work}/cache/${work}.txt"
+
+  outdir="$ROOT/${author}"
+  outfile="$outdir/${work}.txt"
+  mkdir -p "$outdir"
+
+  echo "Fetching CCEL: $author / $work"
+  echo "  URL: $url"
+
+  # Skip if already downloaded (non-empty)
+  if [[ -s "$outfile" ]]; then
+    echo "  (skip) already exists: $outfile"
+    continue
+  fi
+
+  # Download; if it fails, log and continue (do NOT kill the whole run)
+  if ! curl -fL --retry 5 --retry-delay 2 "$url" -o "$outfile"; then
+    echo "  !! MISS/ERROR: $entry  ($url)" >&2
+    rm -f "$outfile" || true
+    continue
+  fi
+
+  # Sanity check: must not be HTML (CCEL WorkInfo pages)
+  if head -n 2 "$outfile" | grep -qiE "<!DOCTYPE|<html"; then
+    echo "  !! BAD (HTML not text): $entry" >&2
+    rm -f "$outfile" || true
+    continue
+  fi
+
+done < "$MANIFEST"
+
+echo "CCEL fetch complete."

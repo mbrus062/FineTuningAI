@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TRI="$HOME/FineTuningAI/bin/tri_ollama"
+
+# Ask for the prompt
+PROMPT="$(zenity --entry \
+  --title="Tri-Ollama Prompt" \
+  --text="Enter your prompt to run through Gemma, Qwen, and Enoch:" \
+  --width=900 \
+  --height=200 \
+  2>/dev/null || true)"
+
+# If cancelled or empty, exit quietly (no error popups)
+if [[ -z "${PROMPT// }" ]]; then
+  exit 0
+fi
+
+# Run tri_ollama in a real terminal so you can see status output
+exec gnome-terminal -- bash -lc "\"$TRI\" \"${PROMPT//\"/\\\"}\"; exec bash"
+

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+  echo "Usage: ccel_fetch_urls <manifest.tsv> <output_root>"
+  echo "Manifest format: <URL><TAB><relative/path/filename>"
+  exit 1
+fi
+
+MANIFEST="$1"
+ROOT="$2"
+mkdir -p "$ROOT"
+
+while IFS=$'\t' read -r url rel; do
+  [[ -z "${url:-}" || "$url" =~ ^# ]] && continue
+  [[ -z "${rel:-}" ]] && { echo "Bad line (missing relpath) for URL: $url" >&2; exit 2; }
+
+  out="$ROOT/$rel"
+  mkdir -p "$(dirname "$out")"
+
+  echo "Fetching: $url"
+  echo "  -> $out"
+
+  if [[ -s "$out" ]]; then
+    echo "  (skip) already exists"
+    continue
+  fi
+
+  if ! curl -fL --retry 8 --retry-delay 2 "$url" -o "$out"; then
+    echo "  !! FAIL: $url" >&2
+    rm -f "$out" || true
+    continue
+  fi
+
+# basic sanity check for “saved HTML”
+# (Do NOT flag XML/ThML doctypes like <!DOCTYPE ThML ...>)
+if head -n 5 "$out" | grep -qiE "<html|<!DOCTYPE[[:space:]]+html"; then
+  echo "  !! BAD (HTML page saved): $url" >&2
+  rm -f "$out" || true
+  continue
+fi
+
+done < "$MANIFEST"
+
+echo "CCEL URL-manifest fetch complete."

@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IDENTIFIER="${1:-encyclopaediabritannicagreatbooksofthewesternworld}"
+OUTDIR="${2:-/ai_data/ebooks/Great_Books_Western_World}"
+FORMATS="${3:-TEXT PDF}"
+
+mkdir -p "$OUTDIR"/{zips,extracted,PDF,TEXT,logs,tmp}
+
+# URL-encode spaces in formats for the /compress endpoint
+ENC_FORMATS="$(python3 - "$FORMATS" <<'PY'
+import sys, urllib.parse
+print(urllib.parse.quote(sys.argv[1]))
+PY
+)"
+
+ZIP_NAME="${IDENTIFIER}__${ENC_FORMATS}.zip"
+ZIP_PATH="$OUTDIR/zips/$ZIP_NAME"
+
+COMPRESS_URL="https://archive.org/compress/${IDENTIFIER}/formats=${ENC_FORMATS}&file=/${IDENTIFIER}.zip"
+
+log() { printf "[%s] %s\n" "$(date '+%F %T')" "$*" | tee -a "$OUTDIR/logs/download.log" >&2; }
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
+}
+need_cmd curl
+need_cmd unzip
+need_cmd python3
+
+log "Identifier : $IDENTIFIER"
+log "Formats    : $FORMATS"
+log "Outdir     : $OUTDIR"
+log "URL        : $COMPRESS_URL"
+log "Zip file   : $ZIP_PATH"
+
+download_zip() {
+  local url="$1" out="$2"
+
+  # Prefer aria2c if available (you have it)
+  if command -v aria2c >/dev/null 2>&1; then
+    aria2c -c -x 4 -s 4 --retry-wait=10 --max-tries=0 \
+      --auto-file-renaming=false \
+      -o "$(basename "$out")" -d "$(dirname "$out")" \
+      "$url" || true
+  else
+    curl -L --retry 20 --retry-delay 5 --retry-all-errors -C - \
+      -o "$out" "$url" || true
+  fi
+}
+
+log "Ensuring zip is complete (will resume until unzip test passes)..."
+until unzip -t "$ZIP_PATH" >/dev/null 2>&1; do
+  log "Zip not valid yet (or missing). Resuming download..."
+  download_zip "$COMPRESS_URL" "$ZIP_PATH"
+  sleep 5
+done
+
+log "Zip validated OK."
+
+EXTRACT_DIR="$OUTDIR/extracted/${IDENTIFIER}"
+mkdir -p "$EXTRACT_DIR"
+
+log "Extracting..."
+# -n: never overwrite existing files
+unzip -n "$ZIP_PATH" -d "$EXTRACT_DIR" >/dev/null
+
+log "Sorting extracted files into PDF/ and TEXT/..."
+# Move PDFs
+find "$EXTRACT_DIR" -type f \( -iname "*.pdf" \) -print0 | while IFS= read -r -d '' f; do
+  bn="$(basename "$f")"
+  # If collision, append a short hash
+  dest="$OUTDIR/PDF/$bn"
+  if [[ -e "$dest" ]]; then
+    h="$(python3 - <<PY
+import hashlib, sys
+p=sys.argv[1]
+print(hashlib.sha1(open(p,'rb').read(1024*1024)).hexdigest()[:10])
+PY
+"$f")"
+    dest="$OUTDIR/PDF/${bn%.pdf}__${h}.pdf"
+  fi
+  mv -n "$f" "$dest" 2>/dev/null || true
+done
+
+# Move plain text (IA sometimes uses .txt or .text)
+find "$EXTRACT_DIR" -type f \( -iname "*.txt" -o -iname "*.text" \) -print0 | while IFS= read -r -d '' f; do
+  bn="$(basename "$f")"
+  dest="$OUTDIR/TEXT/$bn"
+  if [[ -e "$dest" ]]; then
+    h="$(python3 - <<PY
+import hashlib, sys
+p=sys.argv[1]
+print(hashlib.sha1(open(p,'rb').read(1024*1024)).hexdigest()[:10])
+PY
+"$f")"
+    dest="$OUTDIR/TEXT/${bn%.*}__${h}.${bn##*.}"
+  fi
+  mv -n "$f" "$dest" 2>/dev/null || true
+done
+
+log "Done."
+log "PDF count : $(find "$OUTDIR/PDF" -type f | wc -l | tr -d ' ')"
+log "TXT count : $(find "$OUTDIR/TEXT" -type f | wc -l | tr -d ' ')"
+
+cat <<EOF
+
+Next steps (optional):
+  - Inspect:  ls -lh "$OUTDIR/PDF" | head
+  - Inspect:  ls -lh "$OUTDIR/TEXT" | head
+
+Run again anytime; it will resume and avoid overwriting.
+EOF

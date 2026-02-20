@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Schaff batch fetch (v2): discover identifiers via IA Advanced Search,
+# skip access-restricted items, then download+verify PDFs via ia_pdf_fetch_verify.
+
+OUTBASE="${1:-/ai_data/ebooks/History/History_of_the_Christian_Church_Philip_Schaff}"
+TOOL="${2:-/home/mario/FineTuningAI/bin/ia_pdf_fetch_verify}"
+
+mkdir -p "$OUTBASE"
+
+command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 1; }
+[ -x "$TOOL" ] || { echo "Downloader not found or not executable: $TOOL"; exit 1; }
+
+python3 - "$OUTBASE" "$TOOL" <<'PY'
+import json, sys, urllib.parse, urllib.request, subprocess, re
+from pathlib import Path
+
+outbase = Path(sys.argv[1])
+tool = sys.argv[2]
+
+def fetch_json(url: str) -> dict:
+    with urllib.request.urlopen(url) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
+
+def is_access_restricted(ident: str) -> bool:
+    meta = fetch_json(f"https://archive.org/metadata/{ident}")
+    # IA uses this on lending/printdisabled items
+    return str(meta.get("metadata", {}).get("access-restricted-item", "")).lower() == "true"
+
+# IA Advanced Search query (tight enough to mostly hit Schaff's set, but still inclusive)
+q = 'title:("History of the Christian Church") AND creator:("Schaff, Philip")'
+params = {
+    "q": q,
+    "fl[]": "identifier",
+    "rows": "200",
+    "page": "1",
+    "output": "json",
+}
+search_url = "https://archive.org/advancedsearch.php?" + urllib.parse.urlencode(params, doseq=True)
+
+data = fetch_json(search_url)
+idents = [d.get("identifier") for d in data.get("response", {}).get("docs", []) if d.get("identifier")]
+
+if not idents:
+    print("No identifiers found. Query was:", q)
+    sys.exit(2)
+
+# Prefer classic volume-style identifiers first, then anything else (alternate scans/editions).
+# Classic pattern includes both historyofchrist01scha and historyofchris03scha variations.
+classic_pat = re.compile(r"^historyofchris(t)?\d{2}scha$", re.IGNORECASE)
+classic = sorted([i for i in idents if classic_pat.match(i)], key=str.lower)
+others  = sorted([i for i in idents if i not in classic], key=str.lower)
+ordered = classic + others
+
+print("\nFound identifiers (ordered):")
+for i in ordered:
+    print(" -", i)
+
+skipped = []
+downloaded = []
+failed = []
+
+for ident in ordered:
+    try:
+        if is_access_restricted(ident):
+            print(f"\n=== SKIP (access-restricted): {ident}")
+            skipped.append(ident)
+            continue
+
+        outdir = outbase / ident / "PDF"
+        outdir.mkdir(parents=True, exist_ok=True)
+
+        print(f"\n=== Downloading: {ident} => {outdir}")
+        subprocess.check_call([tool, ident, str(outdir)])
+        downloaded.append(ident)
+
+    except subprocess.CalledProcessError as e:
+        print(f"\n!!! FAILED: {ident} (exit={e.returncode})")
+        failed.append(ident)
+    except Exception as e:
+        print(f"\n!!! FAILED: {ident} ({type(e).__name__}: {e})")
+        failed.append(ident)
+
+print("\n===== SUMMARY =====")
+print("Downloaded:", len(downloaded))
+for i in downloaded[:200]:
+    print("  OK  ", i)
+
+print("\nSkipped (restricted):", len(skipped))
+for i in skipped[:200]:
+    print("  SKIP", i)
+
+print("\nFailed:", len(failed))
+for i in failed[:200]:
+    print("  ERR ", i)
+
+# Exit non-zero only if there were true failures (not skips)
+if failed:
+    sys.exit(1)
+
+print("\nDONE: Schaff batch complete (no failures).")
+PY

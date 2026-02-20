@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HOST="127.0.0.1"
+PORT="8787"
+LOG="/tmp/bookshelf_server.log"
+
+PY_SRC="$HOME/FineTuningAI/bin/bookshelf_server.py"
+PYC_FALLBACK="$HOME/FineTuningAI/bin/__pycache__/bookshelf_server.cpython-312.pyc"
+
+# Prefer your bookshelf venv python if present
+if [[ -x "$HOME/FineTuningAI/venvs/bookshelf/bin/python" ]]; then
+  PYTHON="$HOME/FineTuningAI/venvs/bookshelf/bin/python"
+else
+  PYTHON="$(command -v python3)"
+fi
+
+# Kill anything already using the port (avoids "Address already in use")
+if command -v lsof >/dev/null 2>&1; then
+  PID="$(lsof -ti :${PORT} || true)"
+  if [[ -n "${PID}" ]]; then
+    kill "${PID}" || true
+    sleep 0.2
+  fi
+fi
+
+# Choose what to run: non-empty .py first, else fallback .pyc
+if [[ -s "${PY_SRC}" ]]; then
+  TARGET="${PY_SRC}"
+elif [[ -s "${PYC_FALLBACK}" ]]; then
+  TARGET="${PYC_FALLBACK}"
+else
+  echo "ERROR: Bookshelf server missing/empty: ${PY_SRC} and no fallback .pyc found" | tee -a "${LOG}"
+  exit 1
+fi
+
+nohup "${PYTHON}" "${TARGET}" >"${LOG}" 2>&1 &
+sleep 0.8
+xdg-open "http://${HOST}:${PORT}" >/dev/null 2>&1 || true

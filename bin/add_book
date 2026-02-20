@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+LIB="/ai_data/ebooks"
+CATALOG_SCRIPT="$HOME/FineTuningAI/bin/build_library_catalog"
+BOOKSHELF_DIR="/ai_data/ebooks/_bookshelf"
+
+usage() {
+  echo "Usage:"
+  echo "  add_book <SOURCE> <DEST_REL_DIR>"
+  echo ""
+  echo "SOURCE can be:"
+  echo "  - a local file path (/path/to/book.pdf)"
+  echo "  - a URL (https://...)"
+  echo ""
+  echo "DEST_REL_DIR is relative to $LIB, e.g.:"
+  echo "  Christian/Reference/LONANG"
+  echo "  Jewish/Tanakh/Isaiah"
+  echo ""
+  echo "Examples:"
+  echo "  add_book ~/Downloads/foo.pdf Christian/Reference/Misc"
+  echo "  add_book 'https://example.com/book.pdf' Christian/Reference/Misc"
+}
+
+if [[ $# -lt 2 ]]; then
+  usage
+  exit 2
+fi
+
+SRC="$1"
+DEST_REL="$2"
+
+DEST_DIR="$LIB/$DEST_REL"
+mkdir -p "$DEST_DIR"
+
+# Decide filename
+if [[ "$SRC" =~ ^https?:// ]]; then
+  # URL
+  FN="$(basename "${SRC%%\?*}")"
+  [[ -z "$FN" || "$FN" == "/" ]] && FN="downloaded_book"
+  OUT="$DEST_DIR/$FN"
+  if [[ -e "$OUT" ]]; then
+    echo "Refusing to overwrite existing: $OUT"
+    echo "Rename the URL target or remove the existing file."
+    exit 1
+  fi
+  echo "Downloading to: $OUT"
+  curl -L --fail --silent --show-error -o "$OUT" "$SRC"
+else
+  # Local file
+  if [[ ! -f "$SRC" ]]; then
+    echo "Source file not found: $SRC" >&2
+    exit 1
+  fi
+  FN="$(basename "$SRC")"
+  OUT="$DEST_DIR/$FN"
+  if [[ -e "$OUT" ]]; then
+    echo "Refusing to overwrite existing: $OUT"
+    echo "If this is intentional, rename your source file first."
+    exit 1
+  fi
+  echo "Copying to: $OUT"
+  cp -a "$SRC" "$OUT"
+fi
+
+echo
+echo "Added: $OUT"
+
+# Refresh catalogs (Phase 4 artifacts)
+if [[ -x "$CATALOG_SCRIPT" ]]; then
+  echo "Rebuilding catalogs..."
+  python3 -u "$CATALOG_SCRIPT" >/tmp/build_library_catalog_add_book.log 2>&1 || {
+    echo "Catalog rebuild failed; see /tmp/build_library_catalog_add_book.log"
+    exit 1
+  }
+else
+  echo "Warning: build_library_catalog not found/executable at: $CATALOG_SCRIPT"
+fi
+
+# Force Bookshelf index refresh on next load
+if [[ -f "$BOOKSHELF_DIR/index.json" ]]; then
+  echo "Clearing Bookshelf index cache (it will regenerate on next load)..."
+  rm -f "$BOOKSHELF_DIR/index.json"
+fi
+
+echo
+echo "Done. Open Bookshelf and it should appear."

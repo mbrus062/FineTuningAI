@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+export PATH="$HOME/FineTuningAI/bin:$PATH"
+
+IDENTIFIER=$(zenity --entry \
+  --title="Internet Archive PDF Fetch" \
+  --text="Enter IA identifier (e.g. ninebooksofdanis01saxouoft):")
+
+[ -z "$IDENTIFIER" ] && exit 0
+
+OUTDIR=$(zenity --entry \
+  --title="Output Folder" \
+  --text="Enter output directory:" \
+  --entry-text="/ai_data/ebooks/")
+
+[ -z "$OUTDIR" ] && exit 0
+
+gnome-terminal -- bash -lc "
+  echo 'Downloading from Internet Archive...';
+  echo 'Identifier: $IDENTIFIER';
+  echo 'Output dir: $OUTDIR';
+  echo;
+
+  /home/mario/FineTuningAI/bin/ia_pdf_fetch_verify \"$IDENTIFIER\" \"$OUTDIR\";
+  rc=\$?
+
+  echo;
+  echo \"Done (exit code: \$rc). Press Enter to close.\"
+
+  # Force the keypress to be read from the terminal itself
+  read -r _ </dev/tty
+
+  exit \$rc
+"

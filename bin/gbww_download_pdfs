@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IDENTIFIER="${1:-encyclopaediabritannicagreatbooksofthewesternworld}"
+OUTDIR="${2:-/ai_data/ebooks/Great_Books_Western_World/PDF}"
+
+mkdir -p "$OUTDIR"
+command -v aria2c >/dev/null 2>&1 || { echo "aria2c required (sudo apt install aria2)"; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 1; }
+
+python3 - "$IDENTIFIER" "$OUTDIR" <<'PY'
+import json, sys, os, urllib.request, subprocess, hashlib
+from pathlib import Path
+
+identifier, outdir = sys.argv[1], Path(sys.argv[2])
+outdir.mkdir(parents=True, exist_ok=True)
+
+meta_url = f"https://archive.org/metadata/{identifier}"
+with urllib.request.urlopen(meta_url) as r:
+    meta = json.loads(r.read().decode("utf-8", "replace"))
+
+# Build remote map: filename -> size
+remote = {}
+for f in meta.get("files", []):
+    name = f.get("name", "")
+    if name.lower().endswith(".pdf"):
+        remote[name] = int(f.get("size", 0) or 0)
+
+if not remote:
+    print("No PDFs found in metadata for:", identifier)
+    sys.exit(2)
+
+base = f"https://archive.org/download/{identifier}/"
+url_list = outdir / f"{identifier}_pdf_urls.txt"
+fix_list = outdir / "_fix_urls.txt"
+manifest = outdir.parent / f"{identifier}_sha256_manifest.txt"
+
+def aria2_download(list_path: Path, conns: int, splits: int) -> int:
+    cmd = [
+        "aria2c",
+        "-c",
+        "-x", str(conns),
+        "-s", str(splits),
+        "--retry-wait=20",
+        "--max-tries=0",
+        "--auto-file-renaming=false",
+        "--check-integrity=true",
+        "-d", str(outdir),
+        "-i", str(list_path),
+    ]
+    print("\nRunning:", " ".join(cmd))
+    return subprocess.call(cmd)
+
+def verify():
+    missing = []
+    wrong = []
+    for name, rsize in remote.items():
+        p = outdir / name
+        if not p.exists():
+            missing.append(name)
+            continue
+        if rsize:
+            lsize = p.stat().st_size
+            if lsize != rsize:
+                wrong.append((name, lsize, rsize))
+    # any leftover aria2 markers are a red flag
+    markers = list(outdir.glob("*.aria2"))
+    return missing, wrong, markers
+
+# Write full URL list (sorted for determinism)
+with open(url_list, "w", encoding="utf-8") as w:
+    for name in sorted(remote.keys(), key=lambda s: s.lower()):
+        w.write(base + name + "\n")
+
+print(f"Found {len(remote)} PDFs in metadata.")
+print(f"Downloading to: {outdir}")
+print(f"URL list: {url_list}")
+
+# Pass 1: normal speed
+rc1 = aria2_download(url_list, conns=4, splits=4)
+print("aria2 exit code (pass 1):", rc1)
+
+# Verify and build fix list if needed
+missing, wrong, markers = verify()
+
+if missing or wrong or markers:
+    # Create fix list: missing + wrong-size
+    fix_urls = []
+    for name in missing:
+        fix_urls.append(base + name)
+    for name, lsize, rsize in wrong:
+        # remove bad local file + marker so it refetches cleanly
+        p = outdir / name
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+        m = p.with_suffix(p.suffix + ".aria2")
+        if m.exists():
+            m.unlink()
+        fix_urls.append(base + name)
+
+    # Remove orphan markers
+    for m in list(outdir.glob("*.aria2")):
+        target = outdir / m.name[:-6]  # strip ".aria2"
+        if not target.exists():
+            m.unlink()
+
+    fix_urls = sorted(set(fix_urls))
+    with open(fix_list, "w", encoding="utf-8") as w:
+        for u in fix_urls:
+            w.write(u + "\n")
+
+    print("\nVerification found issues:")
+    print("  Missing:", len(missing))
+    print("  Wrong size:", len(wrong))
+    print("  .aria2 markers:", len(markers))
+    print(f"Fix list written: {fix_list}  (URLs: {len(fix_urls)})")
+
+    # Pass 2: gentle mode (1 connection) to avoid IA edge throttling
+    rc2 = aria2_download(fix_list, conns=1, splits=1)
+    print("aria2 exit code (pass 2):", rc2)
+
+    # Re-verify
+    missing, wrong, markers = verify()
+
+# Final gate
+if missing or wrong or markers:
+    print("\nFINAL STATUS: NOT CLEAN")
+    if missing:
+        print("Missing files:")
+        for n in missing[:50]:
+            print(" ", n)
+    if wrong:
+        print("Wrong-size files:")
+        for n, l, r in wrong[:50]:
+            print(f" {n} local={l} remote={r}")
+    if markers:
+        print("Leftover .aria2 markers:")
+        for m in markers[:50]:
+            print(" ", m.name)
+    sys.exit(1)
+
+print("\nFINAL STATUS: CLEAN (all PDFs present and correct size).")
+
+# Write sha256 manifest for audit/re-check
+def sha256_file(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+pdf_paths = sorted((outdir / n for n in remote.keys()), key=lambda p: p.name.lower())
+with open(manifest, "w", encoding="utf-8") as w:
+    for p in pdf_paths:
+        w.write(f"{sha256_file(p)}  {p.name}\n")
+
+print("Wrote manifest:", manifest)
+PY
