@@ -1,13 +1,34 @@
 # AI System Inventory
-Generated: Fri Feb 20 02:13:02 PM MST 2026
+Generated: Fri Feb 20 03:09:18 PM MST 2026
 
 ## Project State (FineTuningAI)
 
 - Repo path: /home/mario/FineTuningAI
 - Git remote origin: https://github.com/mbrus062/FineTuningAI.git
 - Branch: main
-- Head commit: 7cd58fe 2026-02-20 13:46:56 -0700 Add AI inventory documentation and generator
-- Working tree changes: 3 item(s)
+- Head commit: 87ef51e 2026-02-20 14:32:54 -0700 Add DSS and Vermes helper scripts
+- Working tree changes: 2 item(s)
+
+  Changed files (git status --porcelain):
+  -  M AI_INVENTORY.md
+  -  M bin/ai_inventory
+
+## Project Identity
+
+- This is the FineTuningAI research platform.
+- Primary purpose: AI-assisted historical, theological, and corpus research.
+- GitHub-backed, version-controlled system.
+- Inventory file is the authoritative context rehydration document.
+
+## Development Guardrails
+
+- GitHub repo is the source of truth.
+- Always run 'git status' before modifying scripts.
+- Commit and push after structural or architectural changes.
+- Never overwrite working scripts without versioning.
+- Bookshelf must be launched via: bin/bookshelf_launch.
+- PDFs = reading UI; TXTs = AI ingestion corpus.
+- Corpus flow: ingest → index → query (ask_corpus.py).
 
 ## Bookshelf Wiring
 
@@ -30,7 +51,7 @@ Linux AIExperimental 6.17.0-14-generic #14~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Th
 Filesystem                                   Size  Used Avail Use% Mounted on
 tmpfs                                         19G  6.0M   19G   1% /run
 /dev/nvme1n1p5                               2.4T  663G  1.6T  30% /
-tmpfs                                         95G  886M   94G   1% /dev/shm
+tmpfs                                         95G  892M   94G   1% /dev/shm
 tmpfs                                        5.0M   16K  5.0M   1% /run/lock
 efivarfs                                     256K  135K  117K  54% /sys/firmware/efi/efivars
 /dev/nvme1n1p1                                96M   38M   59M  39% /boot/efi
@@ -39,8 +60,93 @@ efivarfs                                     256K  135K  117K  54% /sys/firmware
 //192.168.2.87/Docker                        3.7T  2.4T  1.4T  65% /mnt/Docker
 tmpfs                                         19G  188K   19G   1% /run/user/1000
 
+## Block Devices (lsblk)
+NAME          SIZE MODEL             SERIAL               TRAN   FSTYPE   FSVER LABEL   UUID                                 MOUNTPOINTS
+loop0           4K                                               squashfs 4.0                                                /snap/bare/5
+loop1        63.8M                                               squashfs 4.0                                                /snap/core20/2686
+loop2          74M                                               squashfs 4.0                                                /snap/core22/2292
+loop3        73.9M                                               squashfs 4.0                                                /snap/core22/2216
+loop4        66.9M                                               squashfs 4.0                                                /snap/core24/1349
+loop5        66.8M                                               squashfs 4.0                                                /snap/core24/1267
+loop6         4.9M                                               squashfs 4.0                                                /snap/curl/2369
+loop7         4.9M                                               squashfs 4.0                                                /snap/curl/2384
+loop8        11.1M                                               squashfs 4.0                                                /snap/firmware-updater/167
+loop9        18.5M                                               squashfs 4.0                                                /snap/firmware-updater/210
+loop10        4.9M                                               squashfs 4.0                                                /snap/glow/90
+loop11      516.2M                                               squashfs 4.0                                                /snap/gnome-42-2204/226
+loop12      531.4M                                               squashfs 4.0                                                /snap/gnome-42-2204/247
+loop13      606.1M                                               squashfs 4.0                                                /snap/gnome-46-2404/153
+loop14      669.8M                                               squashfs 4.0                                                /snap/gnome-46-2404/145
+loop15        395M                                               squashfs 4.0                                                /snap/mesa-2404/1165
+loop16       91.7M                                               squashfs 4.0                                                /snap/gtk-common-themes/1535
+loop17      290.8M                                               squashfs 4.0                                                /snap/mesa-2404/912
+loop18        9.9M                                               squashfs 4.0                                                /snap/nmap/4171
+loop19      167.5M                                               squashfs 4.0                                                /snap/signal-desktop/878
+loop20      117.3M                                               squashfs 4.0                                                /snap/proton-mail/30
+loop21       47.6M                                               squashfs 4.0                                                /snap/cups/1142
+loop22       48.8M                                               squashfs 4.0                                                /snap/cups/1146
+loop23       17.5M                                               squashfs 4.0                                                /snap/snap-store/1300
+loop24       10.8M                                               squashfs 4.0                                                /snap/snap-store/1270
+loop25       50.9M                                               squashfs 4.0                                                /snap/snapd/25577
+loop26       48.1M                                               squashfs 4.0                                                /snap/snapd/25935
+loop27        576K                                               squashfs 4.0                                                /snap/snapd-desktop-integration/315
+loop28        576K                                               squashfs 4.0                                                /snap/snapd-desktop-integration/343
+loop30      119.4M                                               squashfs 4.0                                                /snap/proton-mail/34
+loop31       63.8M                                               squashfs 4.0                                                /snap/core20/2717
+loop32      169.3M                                               squashfs 4.0                                                /snap/signal-desktop/880
+zram0         256M                                                                                                           [SWAP]
+nvme1n1       3.6T CT4000T710SSD8    2534527F11FF         nvme                                                               
+├─nvme1n1p1   100M                                        nvme   vfat     FAT32         6C77-D271                            /boot/efi
+├─nvme1n1p2    16M                                        nvme                                                               
+├─nvme1n1p3   643G                                        nvme   ntfs                   A430789E3078795E                     
+├─nvme1n1p4   730M                                        nvme   ntfs                   68F01BFFF01BD1E4                     
+└─nvme1n1p5   2.4T                                        nvme   ext4     1.0           6b3d2070-39f9-4288-850a-77f97d193eea /
+nvme0n1       3.7T SPCC M.2 PCIe SSD AA000000000000002223 nvme                                                               
+└─nvme0n1p1   3.7T                                        nvme   ext4     1.0   ai_data 908ce05c-7fd9-4b8f-add9-bd58604029b9 /ai_data
+
+## Filesystem Signatures (blkid)
+/dev/nvme1n1p5: UUID="6b3d2070-39f9-4288-850a-77f97d193eea" BLOCK_SIZE="4096" TYPE="ext4" PARTUUID="092bc37c-829d-44a9-8eb4-0cbd78ec9cfa"
+/dev/loop1: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop19: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/nvme0n1p1: LABEL="ai_data" UUID="908ce05c-7fd9-4b8f-add9-bd58604029b9" BLOCK_SIZE="4096" TYPE="ext4" PARTLABEL="primary" PARTUUID="069c9507-4216-48c9-b0e6-3cd2a6efc1f5"
+/dev/loop27: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop17: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop8: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop25: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop15: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop6: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop23: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop13: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop4: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop31: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop21: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop11: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop2: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop0: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop28: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop18: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop9: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop26: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop16: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop7: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/nvme1n1p4: BLOCK_SIZE="512" UUID="68F01BFFF01BD1E4" TYPE="ntfs" PARTUUID="e1066904-822f-49a9-8aae-75405155207d"
+/dev/nvme1n1p3: BLOCK_SIZE="512" UUID="A430789E3078795E" TYPE="ntfs" PARTLABEL="Basic data partition" PARTUUID="fc96b4d3-2e11-4457-b0f3-d5caaf884863"
+/dev/nvme1n1p1: UUID="6C77-D271" BLOCK_SIZE="512" TYPE="vfat" PARTLABEL="EFI system partition" PARTUUID="8ad4122d-78ef-4cc8-be23-0638849f9020"
+/dev/loop24: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop14: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/zram0: UUID="2ef51cc1-1b89-4097-aaf6-313b56c5b134" TYPE="swap"
+/dev/loop5: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop32: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop22: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop12: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop3: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop30: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop20: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/loop10: BLOCK_SIZE="131072" TYPE="squashfs"
+/dev/nvme1n1p2: PARTLABEL="Microsoft reserved partition" PARTUUID="c3b38943-5dcd-49b0-9711-fefc29f99c31"
+
 ## GPU
-Fri Feb 20 14:13:09 2026       
+Fri Feb 20 15:09:18 2026       
 +-----------------------------------------------------------------------------------------+
 | NVIDIA-SMI 580.126.09             Driver Version: 580.126.09     CUDA Version: 13.0     |
 +-----------------------------------------+------------------------+----------------------+
@@ -49,7 +155,7 @@ Fri Feb 20 14:13:09 2026
 |                                         |                        |               MIG M. |
 |=========================================+========================+======================|
 |   0  NVIDIA GeForce RTX 5090        Off |   00000000:01:00.0  On |                  N/A |
-|  0%   57C    P8             31W /  575W |    1144MiB /  32607MiB |      0%      Default |
+|  0%   50C    P8             28W /  575W |    1134MiB /  32607MiB |      0%      Default |
 |                                         |                        |                  N/A |
 +-----------------------------------------+------------------------+----------------------+
 
@@ -58,10 +164,10 @@ Fri Feb 20 14:13:09 2026
 |  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
 |        ID   ID                                                               Usage      |
 |=========================================================================================|
-|    0   N/A  N/A            3267      G   /usr/lib/xorg/Xorg                      915MiB |
-|    0   N/A  N/A            3437      G   /usr/bin/gnome-shell                     77MiB |
-|    0   N/A  N/A            4362      G   ...rack-uuid=3190708988185955192         77MiB |
-|    0   N/A  N/A         2882177      G   /usr/bin/gnome-text-editor               19MiB |
+|    0   N/A  N/A            3267      G   /usr/lib/xorg/Xorg                      914MiB |
+|    0   N/A  N/A            3437      G   /usr/bin/gnome-shell                     71MiB |
+|    0   N/A  N/A            4362      G   ...rack-uuid=3190708988185955192         73MiB |
+|    0   N/A  N/A         2889403      G   /usr/bin/gnome-text-editor               19MiB |
 +-----------------------------------------------------------------------------------------+
 
 ## Python
@@ -96,6 +202,12 @@ mixtral:8x7b                                                    a3b6bef0f836    
 qwen3-vl:32b                                                    ff2e46876908    20 GB     3 months ago    
 llama2:latest                                                   78e26419b446    3.8 GB    3 months ago    
 
+- Ollama default model (if any):
+NAME                                                            ID              SIZE      MODIFIED     
+enoch-md:latest                                                 7f57e9c8f6b3    7.5 GB    5 weeks ago     
+
 ## AI Corpus
 0	/home/mario/ai_corpus
+- File count:
+0
 

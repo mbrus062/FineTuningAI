@@ -28,6 +28,24 @@ echo "  Changed files (git status --porcelain):" >> "$OUT"
 git -C "$HOME/FineTuningAI" status --porcelain 2>/dev/null | sed 's/^/  - /' >> "$OUT" || true
 echo >> "$OUT"
 
+echo "## Project Identity" >> "$OUT"
+echo >> "$OUT"
+echo "- This is the FineTuningAI research platform." >> "$OUT"
+echo "- Primary purpose: AI-assisted historical, theological, and corpus research." >> "$OUT"
+echo "- GitHub-backed, version-controlled system." >> "$OUT"
+echo "- Inventory file is the authoritative context rehydration document." >> "$OUT"
+echo >> "$OUT"
+
+echo "## Development Guardrails" >> "$OUT"
+echo >> "$OUT"
+echo "- GitHub repo is the source of truth." >> "$OUT"
+echo "- Always run 'git status' before modifying scripts." >> "$OUT"
+echo "- Commit and push after structural or architectural changes." >> "$OUT"
+echo "- Never overwrite working scripts without versioning." >> "$OUT"
+echo "- Bookshelf must be launched via: bin/bookshelf_launch." >> "$OUT"
+echo "- PDFs = reading UI; TXTs = AI ingestion corpus." >> "$OUT"
+echo "- Corpus flow: ingest → index → query (ask_corpus.py)." >> "$OUT"
+echo >> "$OUT"
 
 echo "## Bookshelf Wiring" >> "$OUT"
 echo >> "$OUT"
@@ -50,7 +68,6 @@ echo "- Fallback .pyc present:" >> "$OUT"
 echo "- URL: http://127.0.0.1:8787" >> "$OUT"
 echo >> "$OUT"
 
-
 echo "## Host / OS" >> "$OUT"
 uname -a >> "$OUT"
 echo >> "$OUT"
@@ -59,13 +76,17 @@ echo "## Disk / Mounts" >> "$OUT"
 df -h >> "$OUT"
 echo >> "$OUT"
 
-echo
-echo "## Block Devices (lsblk)"
-lsblk -o NAME,SIZE,MODEL,SERIAL,TRAN,FSTYPE,FSVER,LABEL,UUID,MOUNTPOINTS
+echo "## Block Devices (lsblk)" >> "$OUT"
+lsblk -o NAME,SIZE,MODEL,SERIAL,TRAN,FSTYPE,FSVER,LABEL,UUID,MOUNTPOINTS >> "$OUT" 2>/dev/null || true
+echo >> "$OUT"
 
-echo
-echo "## Filesystem Signatures (blkid)"
-sudo blkid || true
+echo "## Filesystem Signatures (blkid)" >> "$OUT"
+if sudo -n true 2>/dev/null; then
+  sudo blkid | grep -v '^/dev/loop' >> "$OUT" 2>/dev/null || true
+else
+  echo "(skipped: requires sudo; run 'sudo -v' first if you want this included)" >> "$OUT"
+fi
+echo >> "$OUT"
 
 echo "## GPU" >> "$OUT"
 command -v nvidia-smi >/dev/null && nvidia-smi >> "$OUT" || echo "No NVIDIA GPU detected" >> "$OUT"
@@ -84,8 +105,18 @@ echo "## Ollama Models" >> "$OUT"
 command -v ollama >/dev/null && ollama list >> "$OUT" || echo "Ollama not installed" >> "$OUT"
 echo >> "$OUT"
 
+echo "- Ollama default model (if any):" >> "$OUT"
+ollama list | head -n 2 >> "$OUT" 2>/dev/null || true
+echo >> "$OUT"
+
 echo "## AI Corpus" >> "$OUT"
-[ -d "$HOME/ai_corpus" ] && du -sh "$HOME/ai_corpus" >> "$OUT"
+if [ -d "$HOME/ai_corpus" ]; then
+  du -sh "$HOME/ai_corpus" >> "$OUT"
+  echo "- File count:" >> "$OUT"
+  find "$HOME/ai_corpus" -type f | wc -l >> "$OUT"
+else
+  echo "ai_corpus directory not found" >> "$OUT"
+fi
 echo >> "$OUT"
 
 echo "Inventory written to $OUT"
