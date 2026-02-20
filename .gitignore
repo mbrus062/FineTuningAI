@@ -1,5 +1,26 @@
-venvs/
-library/
+# --- Python / caches ---
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# --- Virtual environments ---
+venvs/
+.venv/
+
+# --- Logs / temp ---
 *.log
+tmp/
+recovered_bookshelf/
+tri_runs/
+
+# --- Large corpora & libraries (do not version) ---
+library/
+corpus/
+inventory/
+manifests/
+
+# --- OS / editor ---
+.DS_Store
+*~
+*.swp
