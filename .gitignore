@@ -1,0 +1,5 @@
+venvs/
+library/
+__pycache__/
+*.pyc
+*.log
