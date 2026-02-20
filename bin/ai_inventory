@@ -24,6 +24,11 @@ echo >> "$OUT"
 echo "- Working tree changes: $(git -C "$HOME/FineTuningAI" status --porcelain 2>/dev/null | wc -l) item(s)" >> "$OUT"
 echo >> "$OUT"
 
+echo "  Changed files (git status --porcelain):" >> "$OUT"
+git -C "$HOME/FineTuningAI" status --porcelain 2>/dev/null | sed 's/^/  - /' >> "$OUT" || true
+echo >> "$OUT"
+
+
 echo "## Bookshelf Wiring" >> "$OUT"
 echo >> "$OUT"
 

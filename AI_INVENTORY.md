@@ -1,5 +1,27 @@
 # AI System Inventory
-Generated: Fri Feb 20 12:35:32 PM MST 2026
+Generated: Fri Feb 20 02:13:02 PM MST 2026
+
+## Project State (FineTuningAI)
+
+- Repo path: /home/mario/FineTuningAI
+- Git remote origin: https://github.com/mbrus062/FineTuningAI.git
+- Branch: main
+- Head commit: 7cd58fe 2026-02-20 13:46:56 -0700 Add AI inventory documentation and generator
+- Working tree changes: 3 item(s)
+
+## Bookshelf Wiring
+
+- Desktop file: /home/mario/Desktop/Bookshelf.desktop
+- Desktop Exec line:
+Exec=bash -lc '/home/mario/FineTuningAI/bin/bookshelf_launch'
+
+- Launcher present:
+yes
+- Server .py size:
+-rwxrwxr-x 1 mario mario 4.1K Feb 20 12:19 /home/mario/FineTuningAI/bin/bookshelf_server.py
+- Fallback .pyc present:
+yes
+- URL: http://127.0.0.1:8787
 
 ## Host / OS
 Linux AIExperimental 6.17.0-14-generic #14~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Thu Jan 15 15:52:10 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
@@ -8,17 +30,17 @@ Linux AIExperimental 6.17.0-14-generic #14~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Th
 Filesystem                                   Size  Used Avail Use% Mounted on
 tmpfs                                         19G  6.0M   19G   1% /run
 /dev/nvme1n1p5                               2.4T  663G  1.6T  30% /
-tmpfs                                         95G  882M   94G   1% /dev/shm
+tmpfs                                         95G  886M   94G   1% /dev/shm
 tmpfs                                        5.0M   16K  5.0M   1% /run/lock
 efivarfs                                     256K  135K  117K  54% /sys/firmware/efi/efivars
 /dev/nvme1n1p1                                96M   38M   59M  39% /boot/efi
 /dev/nvme0n1p1                               3.7T  487G  3.1T  14% /ai_data
 //192.168.2.87/Downloads_Entire_Network_NAS  3.7T  2.4T  1.4T  65% /mnt/Downloads_Entire_Network_NAS
 //192.168.2.87/Docker                        3.7T  2.4T  1.4T  65% /mnt/Docker
-tmpfs                                         19G  172K   19G   1% /run/user/1000
+tmpfs                                         19G  188K   19G   1% /run/user/1000
 
 ## GPU
-Fri Feb 20 12:35:32 2026       
+Fri Feb 20 14:13:09 2026       
 +-----------------------------------------------------------------------------------------+
 | NVIDIA-SMI 580.126.09             Driver Version: 580.126.09     CUDA Version: 13.0     |
 +-----------------------------------------+------------------------+----------------------+
@@ -27,7 +49,7 @@ Fri Feb 20 12:35:32 2026
 |                                         |                        |               MIG M. |
 |=========================================+========================+======================|
 |   0  NVIDIA GeForce RTX 5090        Off |   00000000:01:00.0  On |                  N/A |
-|  0%   41C    P8             30W /  575W |    1250MiB /  32607MiB |      3%      Default |
+|  0%   57C    P8             31W /  575W |    1144MiB /  32607MiB |      0%      Default |
 |                                         |                        |                  N/A |
 +-----------------------------------------+------------------------+----------------------+
 
@@ -36,11 +58,10 @@ Fri Feb 20 12:35:32 2026
 |  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
 |        ID   ID                                                               Usage      |
 |=========================================================================================|
-|    0   N/A  N/A            3267      G   /usr/lib/xorg/Xorg                      916MiB |
-|    0   N/A  N/A            3437      G   /usr/bin/gnome-shell                     71MiB |
-|    0   N/A  N/A            4362      G   ...rack-uuid=3190708988185955192        164MiB |
-|    0   N/A  N/A         2857641      G   /usr/bin/nautilus                        15MiB |
-|    0   N/A  N/A         2858681      G   /usr/bin/gnome-text-editor               18MiB |
+|    0   N/A  N/A            3267      G   /usr/lib/xorg/Xorg                      915MiB |
+|    0   N/A  N/A            3437      G   /usr/bin/gnome-shell                     77MiB |
+|    0   N/A  N/A            4362      G   ...rack-uuid=3190708988185955192         77MiB |
+|    0   N/A  N/A         2882177      G   /usr/bin/gnome-text-editor               19MiB |
 +-----------------------------------------------------------------------------------------+
 
 ## Python
