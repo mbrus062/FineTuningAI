@@ -193,6 +193,38 @@ PY
   echo "- Keep PDFs for reading; extracted .txt is what feeds AI."
   echo "- If a PDF yields a tiny extracted txt (<~2000 bytes), it’s likely scanned → needs OCR later."
 } >> "$OUT"
+
+# -----------------------------
+# Manifest & Corpus Summary
+# -----------------------------
+{
+  echo
+  echo "## Manifest & Corpus Summary"
+  echo
+
+  MFDIR="$HOME/ai_corpus/manifests"
+  EXTDIR="$HOME/ai_corpus/extracted_text"
+
+  if [ -d "$MFDIR" ]; then
+    MANIFEST_COUNT=$(ls "$MFDIR"/manifest_*.csv 2>/dev/null | wc -l)
+    ROW_COUNT=$(cat "$MFDIR"/manifest_*.csv 2>/dev/null | wc -l)
+    echo "- Manifest files: $MANIFEST_COUNT"
+    echo "- Total manifest rows (including headers): $ROW_COUNT"
+  else
+    echo "- Manifest directory not found: $MFDIR"
+  fi
+
+  if [ -d "$EXTDIR" ]; then
+    TXT_COUNT=$(find "$EXTDIR" -type f -name "*.txt" 2>/dev/null | wc -l)
+    TXT_SIZE=$(du -sh "$EXTDIR" 2>/dev/null | awk '{print $1}')
+    echo "- Extracted text files: $TXT_COUNT"
+    echo "- Extracted text total size: $TXT_SIZE"
+  else
+    echo "- Extracted text directory not found: $EXTDIR"
+  fi
+
+} >> "$OUT"
+
 # -----------------------------
 # OCR Ticklers
 # -----------------------------
