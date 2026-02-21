@@ -1,122 +1,197 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 OUT="$HOME/FineTuningAI/AI_INVENTORY.md"
 
-echo "# AI System Inventory" > "$OUT"
-echo "Generated: $(date)" >> "$OUT"
-echo >> "$OUT"
+# Write EVERYTHING into the markdown file (prevents stray terminal output)
+{
+  echo "# AI System Inventory"
+  echo "Generated: $(date)"
+  echo
 
-echo "## Project State (FineTuningAI)" >> "$OUT"
-echo >> "$OUT"
+  echo "## Project State (FineTuningAI)"
+  echo
+  echo "- Repo path: $HOME/FineTuningAI"
 
-echo "- Repo path: $HOME/FineTuningAI" >> "$OUT"
+  echo -n "- Git remote origin: "
+  git -C "$HOME/FineTuningAI" remote get-url origin 2>/dev/null || echo "NOT SET"
 
-echo -n "- Git remote origin: " >> "$OUT"
-git -C "$HOME/FineTuningAI" remote get-url origin 2>/dev/null >> "$OUT" || echo "NOT SET" >> "$OUT"
+  echo -n "- Branch: "
+  git -C "$HOME/FineTuningAI" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "UNKNOWN"
 
-echo -n "- Branch: " >> "$OUT"
-git -C "$HOME/FineTuningAI" rev-parse --abbrev-ref HEAD 2>/dev/null >> "$OUT" || echo "UNKNOWN" >> "$OUT"
+  echo -n "- Head commit: "
+  git -C "$HOME/FineTuningAI" log -1 --pretty=format:"%h %ad %s" --date=iso 2>/dev/null || echo "NONE"
+  echo
 
-echo -n "- Head commit: " >> "$OUT"
-git -C "$HOME/FineTuningAI" log -1 --pretty=format:"%h %ad %s" --date=iso 2>/dev/null >> "$OUT" || echo "NONE" >> "$OUT"
-echo >> "$OUT"
+  echo "- Working tree changes: $(git -C "$HOME/FineTuningAI" status --porcelain 2>/dev/null | wc -l) item(s)"
+  echo
+  echo "  Changed files (git status --porcelain):"
+  git -C "$HOME/FineTuningAI" status --porcelain 2>/dev/null | sed 's/^/  - /' || true
+  echo
 
-echo "- Working tree changes: $(git -C "$HOME/FineTuningAI" status --porcelain 2>/dev/null | wc -l) item(s)" >> "$OUT"
-echo >> "$OUT"
+  echo "## Project Identity"
+  echo
+  echo "- This is the FineTuningAI research platform."
+  echo "- Primary purpose: AI-assisted historical, theological, and corpus research."
+  echo "- GitHub-backed, version-controlled system."
+  echo "- Inventory file is the authoritative context rehydration document."
+  echo
 
-echo "  Changed files (git status --porcelain):" >> "$OUT"
-git -C "$HOME/FineTuningAI" status --porcelain 2>/dev/null | sed 's/^/  - /' >> "$OUT" || true
-echo >> "$OUT"
+  echo "## Development Guardrails"
+  echo
+  echo "- GitHub repo is the source of truth."
+  echo "- Always run 'git status' before modifying scripts."
+  echo "- Commit and push after structural or architectural changes."
+  echo "- Never overwrite working scripts without versioning."
+  echo "- Bookshelf must be launched via: bin/bookshelf_launch."
+  echo "- PDFs = reading UI; TXTs = AI ingestion corpus."
+  echo "- Corpus flow: ingest → index → query."
+  echo
 
-echo "## Project Identity" >> "$OUT"
-echo >> "$OUT"
-echo "- This is the FineTuningAI research platform." >> "$OUT"
-echo "- Primary purpose: AI-assisted historical, theological, and corpus research." >> "$OUT"
-echo "- GitHub-backed, version-controlled system." >> "$OUT"
-echo "- Inventory file is the authoritative context rehydration document." >> "$OUT"
-echo >> "$OUT"
+  echo "## Bookshelf Wiring"
+  echo
+  echo "- Desktop file: $HOME/Desktop/Bookshelf.desktop"
+  echo "- Desktop Exec line:"
+  if [ -f "$HOME/Desktop/Bookshelf.desktop" ]; then
+    grep "^Exec=" "$HOME/Desktop/Bookshelf.desktop" || echo "NOT FOUND"
+  else
+    echo "NOT FOUND"
+  fi
+  echo
+  echo "- Launcher present:"
+  [ -f "$HOME/FineTuningAI/bin/bookshelf_launch" ] && echo "yes" || echo "no"
+  echo
 
-echo "## Development Guardrails" >> "$OUT"
-echo >> "$OUT"
-echo "- GitHub repo is the source of truth." >> "$OUT"
-echo "- Always run 'git status' before modifying scripts." >> "$OUT"
-echo "- Commit and push after structural or architectural changes." >> "$OUT"
-echo "- Never overwrite working scripts without versioning." >> "$OUT"
-echo "- Bookshelf must be launched via: bin/bookshelf_launch." >> "$OUT"
-echo "- PDFs = reading UI; TXTs = AI ingestion corpus." >> "$OUT"
-echo "- Corpus flow: ingest → index → query (ask_corpus.py)." >> "$OUT"
-echo >> "$OUT"
+  echo "## Library Roots (Bookshelf vs Corpus)"
+  echo
 
-echo "## Bookshelf Wiring" >> "$OUT"
-echo >> "$OUT"
+  BOOKSHELF_SERVER="$HOME/FineTuningAI/bin/bookshelf_server.py"
+  if [ -f "$BOOKSHELF_SERVER" ]; then
+    LIBROOT=$(python3 - <<'PY'
+import re, pathlib, os
+p = pathlib.Path.home()/"FineTuningAI/bin/bookshelf_server.py"
+txt = p.read_text(encoding="utf-8", errors="ignore")
+m = re.search(r'LIBRARY_ROOT\s*=\s*os\.path\.expanduser\("([^"]+)"\)', txt)
+print(m.group(1) if m else "")
+PY
+)
+    if [ -n "$LIBROOT" ]; then
+      LIBROOT_EXPANDED=$(python3 - <<PY
+import os
+print(os.path.expanduser("$LIBROOT"))
+PY
+)
+      echo "- Bookshelf LIBRARY_ROOT: $LIBROOT_EXPANDED"
+      echo "- Bookshelf LIBRARY_ROOT realpath: $(realpath "$LIBROOT_EXPANDED" 2>/dev/null || echo "n/a")"
+      echo "- Bookshelf LIBRARY_ROOT size: $(du -sh "$LIBROOT_EXPANDED" 2>/dev/null | awk '{print $1}' || echo "n/a")"
+      echo "- Bookshelf PDF count: $(find "$LIBROOT_EXPANDED" -type f -iname "*.pdf" 2>/dev/null | wc -l)"
+      echo "- Bookshelf TXT count: $(find "$LIBROOT_EXPANDED" -type f -iname "*.txt" 2>/dev/null | wc -l)"
+      echo
+    fi
+  fi
 
-echo "- Desktop file: $HOME/Desktop/Bookshelf.desktop" >> "$OUT"
+  echo "### Corpus candidates"
+  CANDIDATES=(
+    "/ai_data/ai_corpus"
+    "/ai_data/ebooks"
+    "$HOME/ai_corpus"
+  )
 
-echo "- Desktop Exec line:" >> "$OUT"
-grep "^Exec=" "$HOME/Desktop/Bookshelf.desktop" 2>/dev/null >> "$OUT" || echo "NOT FOUND" >> "$OUT"
+  for d in "${CANDIDATES[@]}"; do
+    if [ -d "$d" ]; then
+      echo
+      echo "- Corpus candidate: $d"
+      echo "  - realpath: $(realpath "$d" 2>/dev/null || echo "n/a")"
+      echo "  - size: $(du -sh "$d" 2>/dev/null | awk '{print $1}' || echo "n/a")"
+      echo "  - pdf: $(find "$d" -type f -iname '*.pdf' 2>/dev/null | wc -l)"
+      echo "  - txt: $(find "$d" -type f -iname '*.txt' 2>/dev/null | wc -l)"
+      echo "  - top dirs: $(ls -1 "$d" 2>/dev/null | head -n 8 | tr '\n' ' ')"
+    fi
+  done
 
-echo >> "$OUT"
-echo "- Launcher present:" >> "$OUT"
-[ -f "$HOME/FineTuningAI/bin/bookshelf_launch" ] && echo "yes" >> "$OUT" || echo "no" >> "$OUT"
+  echo
+  echo "## Ebook ingestion workflow (standard)"
+  echo
+  echo "### Phase 1: Extract/copy text into ai_corpus (per-library outputs)"
+  echo
+  echo "- Script: ~/ingest_ebooks_phase1.sh"
+  echo "- Default library if no argument is passed: ~/ebooks"
+  echo "- Recommended for manual daily imports: point it at /ai_data/ebooks/_imports/manual_incoming/YYYY-MM-DD"
+  echo
+  echo "Examples:"
+  echo "  bash ~/ingest_ebooks_phase1.sh /ai_data/ebooks/_imports/manual_incoming/2026-02-20"
+  echo "  bash ~/ingest_ebooks_phase1.sh ~/ebooks/History/Reference/Cambridge_Ancient_History"
+  echo
+  echo "Outputs created per-library:"
+  echo "  - OUT:      ~/ai_corpus/extracted_text/<library_label>__<LIB_ID>/"
+  echo "  - MANIFEST: ~/ai_corpus/manifests/manifest_<LIB_ID>.csv"
+  echo
+  echo "Quick checks:"
+  echo "  grep -i needs_ocr ~/ai_corpus/manifests/manifest_<LIB_ID>.csv | head"
+  echo "  grep -i needs_archive_expansion ~/ai_corpus/manifests/manifest_<LIB_ID>.csv | head"
+  echo
+  echo "### Phase 1b: Expand flagged archives and ingest their contents"
+  echo
+  echo "- Script: ~/expand_archives_and_ingest.sh"
+  echo "- Run it against the specific manifest for the library you just ingested:"
+  echo
+  echo "Examples:"
+  echo "  bash ~/expand_archives_and_ingest.sh ~/ai_corpus/manifests/manifest_3c35161e889c.csv"
+  echo "  bash ~/expand_archives_and_ingest.sh ~/ai_corpus/manifests/manifest_fbc5f7ce404b.csv"
+  echo
+  echo "Result:"
+  echo "  - Archive rows get updated to archive_extracted"
+  echo "  - New extracted texts from inside archives get added to the SAME manifest"
+  echo "  - Any newly-discovered OCR candidates get flagged as needs_ocr"
+  echo
 
-echo "- Server .py size:" >> "$OUT"
-ls -lh "$HOME/FineTuningAI/bin/bookshelf_server.py" 2>/dev/null >> "$OUT" || echo "MISSING" >> "$OUT"
+} > "$OUT"
 
-echo "- Fallback .pyc present:" >> "$OUT"
-[ -f "$HOME/FineTuningAI/bin/__pycache__/bookshelf_server.cpython-312.pyc" ] && echo "yes" >> "$OUT" || echo "no" >> "$OUT"
+# Helpful terminal confirmation
 
-echo "- URL: http://127.0.0.1:8787" >> "$OUT"
-echo >> "$OUT"
+# -----------------------------
+# Canonical ingestion procedure
+# -----------------------------
+{
+  echo
+  echo "## Canonical Corpus Ingestion (Standard Procedure)"
+  echo
+  echo "### What this does"
+  echo "- Converts PDFs/TXTs/EPUBs to extracted .txt in a per-library output folder."
+  echo "- Writes a per-library manifest CSV (so runs don’t collide)."
+  echo "- Flags archives (.zip/.7z/.tar/.gz) for expansion, and flags likely-scanned PDFs as needs_ocr."
+  echo
+  echo "### Key scripts"
+  echo "- Ingest script:   ~/ingest_ebooks_phase1.sh"
+  echo "- Archive expander (uses a manifest): ~/expand_archives_and_ingest.sh"
+  echo
+  echo "### IMPORTANT: ingest defaults to ~/ebooks unless you pass a path"
+  echo "- If you run:  bash ~/ingest_ebooks_phase1.sh"
+  echo "  it will scan: ~/ebooks"
+  echo "- To ingest a specific incoming batch, ALWAYS pass the path:"
+  echo
+  echo "#### Standard manual-incoming batch (example)"
+  echo "SRC=\"/ai_data/ebooks/_imports/manual_incoming/YYYY-MM-DD\""
+  echo "bash ~/ingest_ebooks_phase1.sh \"\$SRC\""
+  echo
+  echo "#### Cambridge example (direct folder ingest)"
+  echo "bash ~/ingest_ebooks_phase1.sh \"~/ebooks/History/Reference/Cambridge_Ancient_History\""
+  echo
+  echo "### After ingest: expand archives (if any were flagged)"
+  echo "1) Find flagged archives in that library’s manifest:"
+  echo "   - The ingest output prints: MANIFEST: /home/mario/ai_corpus/manifests/manifest_<LIB_ID>.csv"
+  echo "2) Expand + ingest contents of flagged archives:"
+  echo "   bash ~/expand_archives_and_ingest.sh \"/home/mario/ai_corpus/manifests/manifest_<LIB_ID>.csv\""
+  echo
+  echo "### Quick checks"
+  echo "- OCR candidates:"
+  echo "  grep -i needs_ocr \"/home/mario/ai_corpus/manifests/manifest_<LIB_ID>.csv\" | head"
+  echo "- Archives still pending:"
+  echo "  grep -i needs_archive_expansion \"/home/mario/ai_corpus/manifests/manifest_<LIB_ID>.csv\" | head"
+  echo
+  echo "### Notes"
+  echo "- Keep PDFs for reading; extracted .txt is what feeds AI."
+  echo "- If a PDF yields a tiny extracted txt (<~2000 bytes), it’s likely scanned → needs OCR later."
+} >> "$OUT"
 
-echo "## Host / OS" >> "$OUT"
-uname -a >> "$OUT"
-echo >> "$OUT"
-
-echo "## Disk / Mounts" >> "$OUT"
-df -h >> "$OUT"
-echo >> "$OUT"
-
-echo "## Block Devices (lsblk)" >> "$OUT"
-lsblk -o NAME,SIZE,MODEL,SERIAL,TRAN,FSTYPE,FSVER,LABEL,UUID,MOUNTPOINTS >> "$OUT" 2>/dev/null || true
-echo >> "$OUT"
-
-echo "## Filesystem Signatures (blkid)" >> "$OUT"
-if sudo -n true 2>/dev/null; then
-  sudo blkid | grep -v '^/dev/loop' >> "$OUT" 2>/dev/null || true
-else
-  echo "(skipped: requires sudo; run 'sudo -v' first if you want this included)" >> "$OUT"
-fi
-echo >> "$OUT"
-
-echo "## GPU" >> "$OUT"
-command -v nvidia-smi >/dev/null && nvidia-smi >> "$OUT" || echo "No NVIDIA GPU detected" >> "$OUT"
-echo >> "$OUT"
-
-echo "## Python" >> "$OUT"
-python3 --version >> "$OUT" 2>&1
-pip3 --version >> "$OUT" 2>&1
-echo >> "$OUT"
-
-echo "## Virtual Environments" >> "$OUT"
-find "$HOME" -type d -name "*venv*" 2>/dev/null >> "$OUT"
-echo >> "$OUT"
-
-echo "## Ollama Models" >> "$OUT"
-command -v ollama >/dev/null && ollama list >> "$OUT" || echo "Ollama not installed" >> "$OUT"
-echo >> "$OUT"
-
-echo "- Ollama default model (if any):" >> "$OUT"
-ollama list | head -n 2 >> "$OUT" 2>/dev/null || true
-echo >> "$OUT"
-
-echo "## AI Corpus" >> "$OUT"
-if [ -d "$HOME/ai_corpus" ]; then
-  du -sh "$HOME/ai_corpus" >> "$OUT"
-  echo "- File count:" >> "$OUT"
-  find "$HOME/ai_corpus" -type f | wc -l >> "$OUT"
-else
-  echo "ai_corpus directory not found" >> "$OUT"
-fi
-echo >> "$OUT"
-
-echo "Inventory written to $OUT"
+echo "Wrote: $OUT"

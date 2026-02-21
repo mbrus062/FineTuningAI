@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical landing area for manual downloads (consistent with your /ai_data structure)
+BASE="/ai_data/ebooks/_imports/manual_incoming/2026-02-20"
+LOGDIR="${BASE}/_logs"
+MANIFEST="${BASE}/SHA256SUMS.txt"
+DLLOG="${LOGDIR}/download.log"
+
+mkdir -p "$BASE" "$LOGDIR"
+
+ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+
+# Download helper: prefers wget, falls back to curl
+
+# Download helper: prefers wget, falls back to curl
+fetch() {
+  local url="$1"
+  local out="$2"
+  local part="${out}.part"
+
+  # Already complete?
+  if [[ -s "$out" ]]; then
+    echo "$(ts) SKIP (exists)  $out" | tee -a "$DLLOG"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$out")"
+  echo "$(ts) FETCH          $url" | tee -a "$DLLOG"
+  echo "$(ts) ->            $out" | tee -a "$DLLOG"
+
+  local rc=0
+
+  if command -v wget >/dev/null 2>&1; then
+    wget -q --show-progress --progress=dot:giga \
+      -c --retry-connrefused --tries=25 --waitretry=5 \
+      --timeout=20 --dns-timeout=20 --connect-timeout=20 --read-timeout=30 \
+      --max-redirect=20 \
+      -O "$part" "$url" || rc=$?
+
+  elif command -v curl >/dev/null 2>&1; then
+    curl -L --fail \
+      --retry 10 --retry-delay 2 --retry-connrefused \
+      --connect-timeout 20 \
+      --speed-time 30 --speed-limit 1024 \
+      -o "$part" "$url" || rc=$?
+
+  else
+    echo "$(ts) ERROR: need wget or curl" | tee -a "$DLLOG"
+    return 0
+  fi
+
+  if [[ $rc -ne 0 ]]; then
+    echo "$(ts) FAIL (rc=$rc)   $url" | tee -a "$DLLOG"
+    echo "$(ts) -> keep partial  $part" | tee -a "$DLLOG"
+    return 0
+  fi
+
+  if [[ -s "$part" ]]; then
+    mv -f "$part" "$out"
+    echo "$(ts) OK             $out" | tee -a "$DLLOG"
+  else
+    echo "$(ts) FAIL (empty)    $url" | tee -a "$DLLOG"
+    return 0
+  fi
+}
+
+# Record SHA256 (append only if not already recorded)
+hash_append() {
+  local f="$1"
+  [[ -s "$f" ]] || return 0
+  local line
+  line="$(sha256sum "$f")"
+  # Avoid duplicate entries
+  if [[ -f "$MANIFEST" ]] && grep -Fq "${line%% *}" "$MANIFEST"; then
+    return 0
+  fi
+  echo "$line" >> "$MANIFEST"
+}
+
+# -------------------------
+# DESTINATION SUBFOLDERS
+# -------------------------
+HIST_EEU="${BASE}/History_Eastern_Europe"
+HIST_MOD_EU="${BASE}/History_Modern_Europe"
+HIST_CASIA="${BASE}/History_Central_Asia"
+CHURCH="${BASE}/Christian_Early_Church"
+QUIGLEY="${BASE}/Quigley"
+BERNAYS="${BASE}/Bernays"
+GNOSTIC="${BASE}/Gnostic_Nag_Hammadi"
+KEBRA="${BASE}/Kebra_Nagast"
+
+mkdir -p "$HIST_EEU" "$HIST_MOD_EU" "$HIST_CASIA" "$CHURCH" "$QUIGLEY" "$BERNAYS" "$GNOSTIC" "$KEBRA"
+
+# -------------------------
+# DOWNLOADS (your list)
+# -------------------------
+
+# Empire of the Steppes (PDF)
+fetch \
+  "https://archive.org/download/the-empire-of-the-steppes-a-history-of-central-asia_202510/Grousset%202002%20The%20empire%20of%20the%20steppes%20a%20history%20of%20Central%20Asia.pdf" \
+  "${HIST_CASIA}/Grousset_2002_Empire_of_the_Steppes.pdf"
+hash_append "${HIST_CASIA}/Grousset_2002_Empire_of_the_Steppes.pdf"
+
+# A History of Eastern Europe (Great Courses) (TXT)
+fetch \
+  "https://archive.org/stream/AHistoryOfEasternEurope/AHistoryOfEasternEurope_djvu.txt" \
+  "${HIST_EEU}/Great_Courses_A_History_of_Eastern_Europe.txt"
+hash_append "${HIST_EEU}/Great_Courses_A_History_of_Eastern_Europe.txt"
+
+# A History of Eastern Europe, Crisis and Change (Jeffries 2007) (TXT + PDF)
+fetch \
+  "https://archive.org/stream/A_History_of_Eastern_Europe_Crisis_and_Change_by_Ian_Jeffries_2007/A_History_of_Eastern_Europe_Crisis_and_Change_by_Ian_Jeffries_2007_djvu.txt" \
+  "${HIST_EEU}/Jeffries_2007_A_History_of_Eastern_Europe_Crisis_and_Change.txt"
+hash_append "${HIST_EEU}/Jeffries_2007_A_History_of_Eastern_Europe_Crisis_and_Change.txt"
+
+fetch \
+  "https://archive.org/download/A_History_of_Eastern_Europe_Crisis_and_Change_by_Ian_Jeffries_2007/A_History_of_Eastern_Europe_Crisis_and_Change_by_Ian_Jeffries_2007.pdf" \
+  "${HIST_EEU}/Jeffries_2007_A_History_of_Eastern_Europe_Crisis_and_Change.pdf"
+hash_append "${HIST_EEU}/Jeffries_2007_A_History_of_Eastern_Europe_Crisis_and_Change.pdf"
+
+# Modern Europe 1789-1914 (TXT + PDF)
+fetch \
+  "https://archive.org/stream/in.ernet.dli.2015.102252/2015.102252.Modern-Europe-1789-1914_djvu.txt" \
+  "${HIST_MOD_EU}/Modern_Europe_1789-1914.txt"
+hash_append "${HIST_MOD_EU}/Modern_Europe_1789-1914.txt"
+
+fetch \
+  "https://archive.org/download/in.ernet.dli.2015.102252/2015.102252.Modern-Europe-1789-1914.pdf" \
+  "${HIST_MOD_EU}/Modern_Europe_1789-1914.pdf"
+hash_append "${HIST_MOD_EU}/Modern_Europe_1789-1914.pdf"
+
+# Historical Atlas of Modern Europe 1789-1914 (PDF)
+fetch \
+  "https://archive.org/download/historicalatlaso00robe/historicalatlaso00robe.pdf" \
+  "${HIST_MOD_EU}/Historical_Atlas_of_Modern_Europe_1789-1914.pdf"
+hash_append "${HIST_MOD_EU}/Historical_Atlas_of_Modern_Europe_1789-1914.pdf"
+
+# Behistan inscription of King Darius (TXT + PDF)
+fetch \
+  "https://archive.org/stream/behistaninscript00daririch/behistaninscript00daririch_djvu.txt" \
+  "${HIST_CASIA}/Behistan_Inscription_King_Darius.txt"
+hash_append "${HIST_CASIA}/Behistan_Inscription_King_Darius.txt"
+
+fetch \
+  "https://archive.org/download/behistaninscript00daririch/behistaninscript00daririch.pdf" \
+  "${HIST_CASIA}/Behistan_Inscription_King_Darius.pdf"
+hash_append "${HIST_CASIA}/Behistan_Inscription_King_Darius.pdf"
+
+# Early Christian Doctrines (Kelly) (TXT + PDF)
+fetch \
+  "https://archive.org/stream/pdfy-CY7YNVnvFwggDjnT/103911481-J-N-D-Kelly-Early-Christian-Doctrines_djvu.txt" \
+  "${CHURCH}/Kelly_Early_Christian_Doctrines.txt"
+hash_append "${CHURCH}/Kelly_Early_Christian_Doctrines.txt"
+
+fetch \
+  "https://archive.org/download/pdfy-CY7YNVnvFwggDjnT/103911481-J-N-D-Kelly-Early-Christian-Doctrines.pdf" \
+  "${CHURCH}/Kelly_Early_Christian_Doctrines.pdf"
+hash_append "${CHURCH}/Kelly_Early_Christian_Doctrines.pdf"
+
+# The Early Church (Chadwick) (TXT + PDF)
+fetch \
+  "https://archive.org/stream/20200507-early-church/20200507_%20early%20Church_djvu.txt" \
+  "${CHURCH}/Chadwick_The_Early_Church.txt"
+hash_append "${CHURCH}/Chadwick_The_Early_Church.txt"
+
+fetch \
+  "https://archive.org/download/20200507-early-church/20200507_%20early%20Church_text.pdf" \
+  "${CHURCH}/Chadwick_The_Early_Church.pdf"
+hash_append "${CHURCH}/Chadwick_The_Early_Church.pdf"
+
+# Quigley: Evolution of Civilizations (TXT + PDF)
+fetch \
+  "https://archive.org/stream/CarrollQuigleyTheEvolutionOfCivilizations/Carroll_Quigley_-_The_Evolution_of_Civilizations_djvu.txt" \
+  "${QUIGLEY}/Quigley_Evolution_of_Civilizations.txt"
+hash_append "${QUIGLEY}/Quigley_Evolution_of_Civilizations.txt"
+
+fetch \
+  "https://archive.org/download/CarrollQuigleyTheEvolutionOfCivilizations/Carroll_Quigley_-_The_Evolution_of_Civilizations.pdf" \
+  "${QUIGLEY}/Quigley_Evolution_of_Civilizations.pdf"
+hash_append "${QUIGLEY}/Quigley_Evolution_of_Civilizations.pdf"
+
+# Quigley: Tragedy and Hope (TXT + PDF from carrollquigley.net)
+fetch \
+  "https://archive.org/stream/pdfy-Sv4zfy4FhzwYgEZm/Carroll-Quigley-Tragedy-and-Hope-A-History-of-The-World-in-Our-Time_djvu.txt" \
+  "${QUIGLEY}/Quigley_Tragedy_and_Hope.txt"
+hash_append "${QUIGLEY}/Quigley_Tragedy_and_Hope.txt"
+
+fetch \
+  "https://ia800302.us.archive.org/0/items/pdfy-Sv4zfy4FhzwYgEZm/Carroll-Quigley-Tragedy-and-Hope-A-History-of-The-World-in-Our-Time.pdf" \
+  "${QUIGLEY}/Quigley_Tragedy_and_Hope.pdf"
+hash_append "${QUIGLEY}/Quigley_Tragedy_and_Hope.pdf"
+
+# Quigley: Anglo-American Establishment (TXT + PDF from carrollquigley.net)
+fetch \
+  "https://ia600601.us.archive.org/15/items/read-pdf-book-the-anglo-american-establishment-carroll-quigley-1981/read%20pdf%20book%20-%20The%20Anglo-American%20Establishment%20--%20Carroll%20Quigley%20--%201981.pdf" \
+  "${QUIGLEY}/Quigley_Anglo-American_Establishment.pdf"
+hash_append "${QUIGLEY}/Quigley_Anglo-American_Establishment.pdf"
+
+fetch \
+  "https://www.carrollquigley.net/pdf/the_anglo-american_establishment.pdf" \
+  "${QUIGLEY}/Quigley_Anglo-American_Establishment.pdf"
+hash_append "${QUIGLEY}/Quigley_Anglo-American_Establishment.pdf"
+
+# Bernays – Propaganda (TXT + PDF)
+fetch \
+  "https://archive.org/stream/propaganda00bern_0/propaganda00bern_0_djvu.txt" \
+  "${BERNAYS}/Bernays_Propaganda.txt"
+hash_append "${BERNAYS}/Bernays_Propaganda.txt"
+
+fetch \
+  "https://ia601200.us.archive.org/9/items/BernaysPropaganda/Bernays_Propaganda_text.pdf" \
+  "${BERNAYS}/Bernays_Propaganda.pdf"
+hash_append "${BERNAYS}/Bernays_Propaganda.pdf"
+
+# Nag Hammadi 5 vols (ZIPs)
+fetch \
+  "https://archive.org/compress/the-coptic-gnostic-library.-a-complete-edition-of-the-nag-hammadi-codices-5-vols./formats=DJVUTXT&file=/the-coptic-gnostic-library.-a-complete-edition-of-the-nag-hammadi-codices-5-vols..zip" \
+  "${GNOSTIC}/Nag_Hammadi_5vols_DJVUTXT.zip"
+hash_append "${GNOSTIC}/Nag_Hammadi_5vols_DJVUTXT.zip"
+
+fetch \
+  "https://archive.org/compress/the-coptic-gnostic-library.-a-complete-edition-of-the-nag-hammadi-codices-5-vols./formats=TEXT%20PDF&file=/the-coptic-gnostic-library.-a-complete-edition-of-the-nag-hammadi-codices-5-vols..zip" \
+  "${GNOSTIC}/Nag_Hammadi_5vols_TEXT_PDF.zip"
+hash_append "${GNOSTIC}/Nag_Hammadi_5vols_TEXT_PDF.zip"
+
+# Kebra Nagast (PDF + TXT)
+fetch \
+  "https://archive.org/download/kebranagast/Kebra%20Nagast.pdf" \
+  "${KEBRA}/Kebra_Nagast.pdf"
+hash_append "${KEBRA}/Kebra_Nagast.pdf"
+
+fetch \
+  "https://archive.org/stream/kebranagast/Kebra%20Nagast_djvu.txt" \
+  "${KEBRA}/Kebra_Nagast.txt"
+hash_append "${KEBRA}/Kebra_Nagast.txt"
+
+echo "$(ts) DONE. Files in: $BASE" | tee -a "$DLLOG"
+echo "$(ts) Manifest: $MANIFEST" | tee -a "$DLLOG"

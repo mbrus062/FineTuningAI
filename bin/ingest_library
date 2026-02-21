@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# One standard pipeline:
+#   ingest_library /path/to/library
+# If no path given, defaults to ~/ebooks.
+
+LIB="${1:-$HOME/ebooks}"
+LIB="$(python3 - <<PY
+import os
+from pathlib import Path
+print(str(Path(os.path.expanduser(r"""$LIB""")).resolve()))
+PY
+)"
+
+# Match ingest_ebooks_phase1.sh's LIB_ID rule (sha1 of resolved path, 12 chars)
+LIB_ID="$(python3 - <<PY
+import hashlib
+print(hashlib.sha1(r"""$LIB""".encode("utf-8")).hexdigest()[:12])
+PY
+)"
+
+MANIFEST="$HOME/ai_corpus/manifests/manifest_${LIB_ID}.csv"
+
+echo "=== STANDARD INGEST PIPELINE ==="
+echo "Library:   $LIB"
+echo "LIB_ID:    $LIB_ID"
+echo "Manifest:  $MANIFEST"
+echo
+
+bash "$HOME/ingest_ebooks_phase1.sh" "$LIB"
+
+# Only run archive expansion if the manifest exists (it should)
+if [[ -f "$MANIFEST" ]]; then
+  bash "$HOME/expand_archives_and_ingest.sh" "$MANIFEST"
+else
+  echo "WARN: Manifest not found at $MANIFEST (unexpected)."
+fi
+
+echo
+echo "DONE."

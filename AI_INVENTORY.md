@@ -1,17 +1,21 @@
 # AI System Inventory
-Generated: Fri Feb 20 03:09:18 PM MST 2026
+Generated: Fri Feb 20 09:33:34 PM MST 2026
 
 ## Project State (FineTuningAI)
 
 - Repo path: /home/mario/FineTuningAI
 - Git remote origin: https://github.com/mbrus062/FineTuningAI.git
 - Branch: main
-- Head commit: 87ef51e 2026-02-20 14:32:54 -0700 Add DSS and Vermes helper scripts
-- Working tree changes: 2 item(s)
+- Head commit: e6ebde5 2026-02-20 21:27:56 -0700 Remove redundant inventory generator; canonicalize ai_inventory as single rehydration capsule
+- Working tree changes: 6 item(s)
 
   Changed files (git status --porcelain):
   -  M AI_INVENTORY.md
   -  M bin/ai_inventory
+  - ?? bin/ai_inventory.bak.2026-02-20_211621
+  - ?? bin/batch_fetch_today.sh
+  - ?? bin/fetch_today_books
+  - ?? bin/ingest_library
 
 ## Project Identity
 
@@ -28,7 +32,7 @@ Generated: Fri Feb 20 03:09:18 PM MST 2026
 - Never overwrite working scripts without versioning.
 - Bookshelf must be launched via: bin/bookshelf_launch.
 - PDFs = reading UI; TXTs = AI ingestion corpus.
-- Corpus flow: ingest → index → query (ask_corpus.py).
+- Corpus flow: ingest → index → query.
 
 ## Bookshelf Wiring
 
@@ -38,176 +42,108 @@ Exec=bash -lc '/home/mario/FineTuningAI/bin/bookshelf_launch'
 
 - Launcher present:
 yes
-- Server .py size:
--rwxrwxr-x 1 mario mario 4.1K Feb 20 12:19 /home/mario/FineTuningAI/bin/bookshelf_server.py
-- Fallback .pyc present:
-yes
-- URL: http://127.0.0.1:8787
 
-## Host / OS
-Linux AIExperimental 6.17.0-14-generic #14~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Thu Jan 15 15:52:10 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
+## Library Roots (Bookshelf vs Corpus)
 
-## Disk / Mounts
-Filesystem                                   Size  Used Avail Use% Mounted on
-tmpfs                                         19G  6.0M   19G   1% /run
-/dev/nvme1n1p5                               2.4T  663G  1.6T  30% /
-tmpfs                                         95G  892M   94G   1% /dev/shm
-tmpfs                                        5.0M   16K  5.0M   1% /run/lock
-efivarfs                                     256K  135K  117K  54% /sys/firmware/efi/efivars
-/dev/nvme1n1p1                                96M   38M   59M  39% /boot/efi
-/dev/nvme0n1p1                               3.7T  487G  3.1T  14% /ai_data
-//192.168.2.87/Downloads_Entire_Network_NAS  3.7T  2.4T  1.4T  65% /mnt/Downloads_Entire_Network_NAS
-//192.168.2.87/Docker                        3.7T  2.4T  1.4T  65% /mnt/Docker
-tmpfs                                         19G  188K   19G   1% /run/user/1000
+- Bookshelf LIBRARY_ROOT: /home/mario/FineTuningAI/library
+- Bookshelf LIBRARY_ROOT realpath: /home/mario/FineTuningAI/library
+- Bookshelf LIBRARY_ROOT size: 1.1G
+- Bookshelf PDF count: 16
+- Bookshelf TXT count: 15
 
-## Block Devices (lsblk)
-NAME          SIZE MODEL             SERIAL               TRAN   FSTYPE   FSVER LABEL   UUID                                 MOUNTPOINTS
-loop0           4K                                               squashfs 4.0                                                /snap/bare/5
-loop1        63.8M                                               squashfs 4.0                                                /snap/core20/2686
-loop2          74M                                               squashfs 4.0                                                /snap/core22/2292
-loop3        73.9M                                               squashfs 4.0                                                /snap/core22/2216
-loop4        66.9M                                               squashfs 4.0                                                /snap/core24/1349
-loop5        66.8M                                               squashfs 4.0                                                /snap/core24/1267
-loop6         4.9M                                               squashfs 4.0                                                /snap/curl/2369
-loop7         4.9M                                               squashfs 4.0                                                /snap/curl/2384
-loop8        11.1M                                               squashfs 4.0                                                /snap/firmware-updater/167
-loop9        18.5M                                               squashfs 4.0                                                /snap/firmware-updater/210
-loop10        4.9M                                               squashfs 4.0                                                /snap/glow/90
-loop11      516.2M                                               squashfs 4.0                                                /snap/gnome-42-2204/226
-loop12      531.4M                                               squashfs 4.0                                                /snap/gnome-42-2204/247
-loop13      606.1M                                               squashfs 4.0                                                /snap/gnome-46-2404/153
-loop14      669.8M                                               squashfs 4.0                                                /snap/gnome-46-2404/145
-loop15        395M                                               squashfs 4.0                                                /snap/mesa-2404/1165
-loop16       91.7M                                               squashfs 4.0                                                /snap/gtk-common-themes/1535
-loop17      290.8M                                               squashfs 4.0                                                /snap/mesa-2404/912
-loop18        9.9M                                               squashfs 4.0                                                /snap/nmap/4171
-loop19      167.5M                                               squashfs 4.0                                                /snap/signal-desktop/878
-loop20      117.3M                                               squashfs 4.0                                                /snap/proton-mail/30
-loop21       47.6M                                               squashfs 4.0                                                /snap/cups/1142
-loop22       48.8M                                               squashfs 4.0                                                /snap/cups/1146
-loop23       17.5M                                               squashfs 4.0                                                /snap/snap-store/1300
-loop24       10.8M                                               squashfs 4.0                                                /snap/snap-store/1270
-loop25       50.9M                                               squashfs 4.0                                                /snap/snapd/25577
-loop26       48.1M                                               squashfs 4.0                                                /snap/snapd/25935
-loop27        576K                                               squashfs 4.0                                                /snap/snapd-desktop-integration/315
-loop28        576K                                               squashfs 4.0                                                /snap/snapd-desktop-integration/343
-loop30      119.4M                                               squashfs 4.0                                                /snap/proton-mail/34
-loop31       63.8M                                               squashfs 4.0                                                /snap/core20/2717
-loop32      169.3M                                               squashfs 4.0                                                /snap/signal-desktop/880
-zram0         256M                                                                                                           [SWAP]
-nvme1n1       3.6T CT4000T710SSD8    2534527F11FF         nvme                                                               
-├─nvme1n1p1   100M                                        nvme   vfat     FAT32         6C77-D271                            /boot/efi
-├─nvme1n1p2    16M                                        nvme                                                               
-├─nvme1n1p3   643G                                        nvme   ntfs                   A430789E3078795E                     
-├─nvme1n1p4   730M                                        nvme   ntfs                   68F01BFFF01BD1E4                     
-└─nvme1n1p5   2.4T                                        nvme   ext4     1.0           6b3d2070-39f9-4288-850a-77f97d193eea /
-nvme0n1       3.7T SPCC M.2 PCIe SSD AA000000000000002223 nvme                                                               
-└─nvme0n1p1   3.7T                                        nvme   ext4     1.0   ai_data 908ce05c-7fd9-4b8f-add9-bd58604029b9 /ai_data
+### Corpus candidates
 
-## Filesystem Signatures (blkid)
-/dev/nvme1n1p5: UUID="6b3d2070-39f9-4288-850a-77f97d193eea" BLOCK_SIZE="4096" TYPE="ext4" PARTUUID="092bc37c-829d-44a9-8eb4-0cbd78ec9cfa"
-/dev/loop1: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop19: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/nvme0n1p1: LABEL="ai_data" UUID="908ce05c-7fd9-4b8f-add9-bd58604029b9" BLOCK_SIZE="4096" TYPE="ext4" PARTLABEL="primary" PARTUUID="069c9507-4216-48c9-b0e6-3cd2a6efc1f5"
-/dev/loop27: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop17: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop8: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop25: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop15: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop6: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop23: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop13: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop4: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop31: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop21: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop11: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop2: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop0: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop28: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop18: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop9: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop26: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop16: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop7: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/nvme1n1p4: BLOCK_SIZE="512" UUID="68F01BFFF01BD1E4" TYPE="ntfs" PARTUUID="e1066904-822f-49a9-8aae-75405155207d"
-/dev/nvme1n1p3: BLOCK_SIZE="512" UUID="A430789E3078795E" TYPE="ntfs" PARTLABEL="Basic data partition" PARTUUID="fc96b4d3-2e11-4457-b0f3-d5caaf884863"
-/dev/nvme1n1p1: UUID="6C77-D271" BLOCK_SIZE="512" TYPE="vfat" PARTLABEL="EFI system partition" PARTUUID="8ad4122d-78ef-4cc8-be23-0638849f9020"
-/dev/loop24: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop14: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/zram0: UUID="2ef51cc1-1b89-4097-aaf6-313b56c5b134" TYPE="swap"
-/dev/loop5: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop32: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop22: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop12: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop3: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop30: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop20: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/loop10: BLOCK_SIZE="131072" TYPE="squashfs"
-/dev/nvme1n1p2: PARTLABEL="Microsoft reserved partition" PARTUUID="c3b38943-5dcd-49b0-9711-fefc29f99c31"
+- Corpus candidate: /ai_data/ai_corpus
+  - realpath: /ai_data/ai_corpus
+  - size: 168G
+  - pdf: 45503
+  - txt: 57660
+  - top dirs: extracted_text index index_egw index_egw_complete index_harvard logs manifests manifest.sqlite 
 
-## GPU
-Fri Feb 20 15:09:18 2026       
-+-----------------------------------------------------------------------------------------+
-| NVIDIA-SMI 580.126.09             Driver Version: 580.126.09     CUDA Version: 13.0     |
-+-----------------------------------------+------------------------+----------------------+
-| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
-| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
-|                                         |                        |               MIG M. |
-|=========================================+========================+======================|
-|   0  NVIDIA GeForce RTX 5090        Off |   00000000:01:00.0  On |                  N/A |
-|  0%   50C    P8             28W /  575W |    1134MiB /  32607MiB |      0%      Default |
-|                                         |                        |                  N/A |
-+-----------------------------------------+------------------------+----------------------+
+- Corpus candidate: /ai_data/ebooks
+  - realpath: /ai_data/ebooks
+  - size: 213G
+  - pdf: 47741
+  - txt: 33755
+  - top dirs: 5000 Year Leap.pdf America's Great Depression Ancient History Anderson,Robert-Coming_Prince(b).pdf An Essay Concerning Human Understanding - John Locke Anglo Saxon Chronicle Anglo_Saxon_Norse An Introduction to Christian Economics - Gary North 
 
-+-----------------------------------------------------------------------------------------+
-| Processes:                                                                              |
-|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
-|        ID   ID                                                               Usage      |
-|=========================================================================================|
-|    0   N/A  N/A            3267      G   /usr/lib/xorg/Xorg                      914MiB |
-|    0   N/A  N/A            3437      G   /usr/bin/gnome-shell                     71MiB |
-|    0   N/A  N/A            4362      G   ...rack-uuid=3190708988185955192         73MiB |
-|    0   N/A  N/A         2889403      G   /usr/bin/gnome-text-editor               19MiB |
-+-----------------------------------------------------------------------------------------+
+- Corpus candidate: /home/mario/ai_corpus
+  - realpath: /ai_data/ai_corpus
+  - size: 0
+  - pdf: 0
+  - txt: 0
+  - top dirs: extracted_text index index_egw index_egw_complete index_harvard logs manifests manifest.sqlite 
 
-## Python
-Python 3.12.3
-pip 24.0 from /usr/lib/python3/dist-packages/pip (python 3.12)
+## Ebook ingestion workflow (standard)
 
-## Virtual Environments
-/home/mario/ai-env/lib/python3.12/site-packages/jedi/third_party/typeshed/stdlib/3/venv
-/home/mario/ai-ebooks-venv
-/home/mario/ai-workspace/venv
-/home/mario/FineTuningAI/venvs
+### Phase 1: Extract/copy text into ai_corpus (per-library outputs)
 
-## Ollama Models
-NAME                                                            ID              SIZE      MODIFIED     
-enoch-md:latest                                                 7f57e9c8f6b3    7.5 GB    5 weeks ago     
-gemma-md:latest                                                 966274d24de5    17 GB     5 weeks ago     
-qwen-md:latest                                                  b3857816ce81    9.0 GB    5 weeks ago     
-command-r:latest                                                7d96360d357f    18 GB     5 weeks ago     
-qwen2.5:14b                                                     7cdf5a0187d5    9.0 GB    5 weeks ago     
-enoch:latest                                                    ae454063de58    7.5 GB    5 weeks ago     
-huggingface.co/CWClabs/CWC-Mistral-Nemo-12B-V2-q4_k_m:latest    3002c387d492    7.5 GB    6 weeks ago     
-deepcoder:14b                                                   12bdda054d23    9.0 GB    3 months ago    
-codegemma:7b                                                    0c96700aaada    5.0 GB    3 months ago    
-gemma3:27b                                                      a418f5838eaf    17 GB     3 months ago    
-gemma3:12b                                                      f4031aab637d    8.1 GB    3 months ago    
-codellama:13b                                                   9f438cb9cd58    7.4 GB    3 months ago    
-nous-hermes2:34b                                                1fbb49caabbd    19 GB     3 months ago    
-LLaMa3.1:8b                                                     46e0c10c039e    4.9 GB    3 months ago    
-deepseek-r1:7b                                                  755ced02ce7b    4.7 GB    3 months ago    
-deepseek-r1:32b                                                 edba8017331d    19 GB     3 months ago    
-mixtral:8x7b                                                    a3b6bef0f836    26 GB     3 months ago    
-qwen3-vl:32b                                                    ff2e46876908    20 GB     3 months ago    
-llama2:latest                                                   78e26419b446    3.8 GB    3 months ago    
+- Script: ~/ingest_ebooks_phase1.sh
+- Default library if no argument is passed: ~/ebooks
+- Recommended for manual daily imports: point it at /ai_data/ebooks/_imports/manual_incoming/YYYY-MM-DD
 
-- Ollama default model (if any):
-NAME                                                            ID              SIZE      MODIFIED     
-enoch-md:latest                                                 7f57e9c8f6b3    7.5 GB    5 weeks ago     
+Examples:
+  bash ~/ingest_ebooks_phase1.sh /ai_data/ebooks/_imports/manual_incoming/2026-02-20
+  bash ~/ingest_ebooks_phase1.sh ~/ebooks/History/Reference/Cambridge_Ancient_History
 
-## AI Corpus
-0	/home/mario/ai_corpus
-- File count:
-0
+Outputs created per-library:
+  - OUT:      ~/ai_corpus/extracted_text/<library_label>__<LIB_ID>/
+  - MANIFEST: ~/ai_corpus/manifests/manifest_<LIB_ID>.csv
 
+Quick checks:
+  grep -i needs_ocr ~/ai_corpus/manifests/manifest_<LIB_ID>.csv | head
+  grep -i needs_archive_expansion ~/ai_corpus/manifests/manifest_<LIB_ID>.csv | head
+
+### Phase 1b: Expand flagged archives and ingest their contents
+
+- Script: ~/expand_archives_and_ingest.sh
+- Run it against the specific manifest for the library you just ingested:
+
+Examples:
+  bash ~/expand_archives_and_ingest.sh ~/ai_corpus/manifests/manifest_3c35161e889c.csv
+  bash ~/expand_archives_and_ingest.sh ~/ai_corpus/manifests/manifest_fbc5f7ce404b.csv
+
+Result:
+  - Archive rows get updated to archive_extracted
+  - New extracted texts from inside archives get added to the SAME manifest
+  - Any newly-discovered OCR candidates get flagged as needs_ocr
+
+
+## Canonical Corpus Ingestion (Standard Procedure)
+
+### What this does
+- Converts PDFs/TXTs/EPUBs to extracted .txt in a per-library output folder.
+- Writes a per-library manifest CSV (so runs don’t collide).
+- Flags archives (.zip/.7z/.tar/.gz) for expansion, and flags likely-scanned PDFs as needs_ocr.
+
+### Key scripts
+- Ingest script:   ~/ingest_ebooks_phase1.sh
+- Archive expander (uses a manifest): ~/expand_archives_and_ingest.sh
+
+### IMPORTANT: ingest defaults to ~/ebooks unless you pass a path
+- If you run:  bash ~/ingest_ebooks_phase1.sh
+  it will scan: ~/ebooks
+- To ingest a specific incoming batch, ALWAYS pass the path:
+
+#### Standard manual-incoming batch (example)
+SRC="/ai_data/ebooks/_imports/manual_incoming/YYYY-MM-DD"
+bash ~/ingest_ebooks_phase1.sh "$SRC"
+
+#### Cambridge example (direct folder ingest)
+bash ~/ingest_ebooks_phase1.sh "~/ebooks/History/Reference/Cambridge_Ancient_History"
+
+### After ingest: expand archives (if any were flagged)
+1) Find flagged archives in that library’s manifest:
+   - The ingest output prints: MANIFEST: /home/mario/ai_corpus/manifests/manifest_<LIB_ID>.csv
+2) Expand + ingest contents of flagged archives:
+   bash ~/expand_archives_and_ingest.sh "/home/mario/ai_corpus/manifests/manifest_<LIB_ID>.csv"
+
+### Quick checks
+- OCR candidates:
+  grep -i needs_ocr "/home/mario/ai_corpus/manifests/manifest_<LIB_ID>.csv" | head
+- Archives still pending:
+  grep -i needs_archive_expansion "/home/mario/ai_corpus/manifests/manifest_<LIB_ID>.csv" | head
+
+### Notes
+- Keep PDFs for reading; extracted .txt is what feeds AI.
+- If a PDF yields a tiny extracted txt (<~2000 bytes), it’s likely scanned → needs OCR later.
