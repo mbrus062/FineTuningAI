@@ -193,5 +193,35 @@ PY
   echo "- Keep PDFs for reading; extracted .txt is what feeds AI."
   echo "- If a PDF yields a tiny extracted txt (<~2000 bytes), it’s likely scanned → needs OCR later."
 } >> "$OUT"
+# -----------------------------
+# OCR Ticklers
+# -----------------------------
+{
+  echo
+  echo "## OCR Ticklers (needs_ocr queue)"
+  echo
+
+  MFDIR="$HOME/ai_corpus/manifests"
+
+  if [ -d "$MFDIR" ]; then
+    OCR_TOTAL=$(grep -hsi ',needs_ocr,' "$MFDIR"/manifest_*.csv 2>/dev/null | wc -l)
+    echo "- needs_ocr flagged rows across manifests: $OCR_TOTAL"
+    echo
+
+    echo "  Newest OCR-flagged items (up to 15):"
+    grep -hsi ',needs_ocr,' "$MFDIR"/manifest_*.csv 2>/dev/null \
+      | awk -F, 'NF>=10{print $10 "\t" $1 "\t" $6 "\t" $8} NF<10{print "0\t" $1 "\t" $6 "\t" $8}' \
+      | sort -nr \
+      | head -n 15 \
+      | sed 's/^/  - /' || true
+
+    echo
+    echo "  Queue folder: /ai_data/ebooks/_ocr_queue"
+    echo "  (Batch OCR will operate on everything in that directory.)"
+  else
+    echo "- manifests folder missing: $MFDIR"
+  fi
+
+} >> "$OUT"
 
 echo "Wrote: $OUT"
