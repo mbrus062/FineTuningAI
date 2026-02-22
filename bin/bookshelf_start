@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd /home/mario/FineTuningAI/bin
+/home/mario/FineTuningAI/venvs/bookshelf/bin/python -m uvicorn bookshelf_pdf_server:app \
+  --host 127.0.0.1 --port 8787 --app-dir /home/mario/FineTuningAI/bin

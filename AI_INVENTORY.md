@@ -1,21 +1,22 @@
 # AI System Inventory
-Generated: Fri Feb 20 09:33:34 PM MST 2026
+Generated: Sun Feb 22 12:58:08 PM MST 2026
 
 ## Project State (FineTuningAI)
 
 - Repo path: /home/mario/FineTuningAI
 - Git remote origin: https://github.com/mbrus062/FineTuningAI.git
 - Branch: main
-- Head commit: e6ebde5 2026-02-20 21:27:56 -0700 Remove redundant inventory generator; canonicalize ai_inventory as single rehydration capsule
-- Working tree changes: 6 item(s)
+- Head commit: 5709ef7 2026-02-22 12:31:49 -0700 Fix Bookshelf UI mount; serve correct index.html; stabilize 8787 bookshelf
+- Working tree changes: 7 item(s)
 
   Changed files (git status --porcelain):
   -  M AI_INVENTORY.md
   -  M bin/ai_inventory
-  - ?? bin/ai_inventory.bak.2026-02-20_211621
-  - ?? bin/batch_fetch_today.sh
-  - ?? bin/fetch_today_books
-  - ?? bin/ingest_library
+  - ?? bin/bookshelf_launch_pdf
+  - ?? bin/bookshelf_start
+  - ?? bookshelf_app/catalog.sqlite
+  - ?? bookshelf_app/overrides.json
+  - ?? bookshelf_app/ui/index.html.bak.2026-02-22-1152
 
 ## Project Identity
 
@@ -36,20 +37,29 @@ Generated: Fri Feb 20 09:33:34 PM MST 2026
 
 ## Bookshelf Wiring
 
+- Bookshelf UI served by: /home/mario/FineTuningAI/bookshelf_app/ui/index.html
+- Bookshelf server: /home/mario/FineTuningAI/bin/bookshelf_pdf_server.py (uvicorn on 127.0.0.1:8787)
+- Bookshelf DB: /home/mario/FineTuningAI/bookshelf_app/catalog.sqlite (table: pdfs)
+- Reindexer: /home/mario/FineTuningAI/bin/bookshelf_reindex.py (populates catalog.sqlite)
+- Port: 8787 (local only)
+- Routes: / redirects to /_bookshelf/ ; JSON index at /api/index
+
 - Desktop file: /home/mario/Desktop/Bookshelf.desktop
 - Desktop Exec line:
-Exec=bash -lc '/home/mario/FineTuningAI/bin/bookshelf_launch'
+Exec=gnome-terminal -- bash -lc '/home/mario/FineTuningAI/bin/bookshelf_start'
 
-- Launcher present:
+- Launcher present (expected):
 yes
 
 ## Library Roots (Bookshelf vs Corpus)
 
-- Bookshelf LIBRARY_ROOT: /home/mario/FineTuningAI/library
-- Bookshelf LIBRARY_ROOT realpath: /home/mario/FineTuningAI/library
-- Bookshelf LIBRARY_ROOT size: 1.1G
-- Bookshelf PDF count: 16
-- Bookshelf TXT count: 15
+## Library Roots (Bookshelf vs Corpus)
+
+- Bookshelf PDF library root: /ai_data/ebooks
+  - realpath: /ai_data/ebooks
+  - size: 213G
+  - pdf: 47741
+  - txt: 33755
 
 ### Corpus candidates
 
@@ -57,7 +67,7 @@ yes
   - realpath: /ai_data/ai_corpus
   - size: 168G
   - pdf: 45503
-  - txt: 57660
+  - txt: 58513
   - top dirs: extracted_text index index_egw index_egw_complete index_harvard logs manifests manifest.sqlite 
 
 - Corpus candidate: /ai_data/ebooks
@@ -147,3 +157,20 @@ bash ~/ingest_ebooks_phase1.sh "~/ebooks/History/Reference/Cambridge_Ancient_His
 ### Notes
 - Keep PDFs for reading; extracted .txt is what feeds AI.
 - If a PDF yields a tiny extracted txt (<~2000 bytes), it’s likely scanned → needs OCR later.
+
+## Manifest & Corpus Summary
+
+- Manifest files: 3
+- Total manifest rows (including headers): 100
+- Extracted text files: 48855
+- Extracted text total size: 18G
+
+## OCR Ticklers (needs_ocr queue)
+
+- needs_ocr flagged rows across manifests: 1
+
+  Newest OCR-flagged items (up to 15):
+  - 0	/ai_data/ebooks/_imports/manual_incoming/2026-02-20/History_Modern_Europe/Modern_Europe_1789-1914.pdf	/ai_data/ai_corpus/extracted_text/ai_data__ebooks___imports__manual_incoming__2026-02-20__3c35161e889c/History_Modern_Europe__Modern_Europe_1789-1914.pdf.txt	needs_ocr
+
+  Queue folder: /ai_data/ebooks/_ocr_queue
+  (Batch OCR will operate on everything in that directory.)

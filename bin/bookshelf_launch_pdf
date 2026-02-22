@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HOST="127.0.0.1"
+PORT="8787"
+LOG="/tmp/bookshelf_pdf.log"
+
+# Prefer bookshelf venv python
+if [[ -x "$HOME/FineTuningAI/venvs/bookshelf/bin/python" ]]; then
+  PYTHON="$HOME/FineTuningAI/venvs/bookshelf/bin/python"
+else
+  PYTHON="$(command -v python3)"
+fi
+
+# kill old 8787 listener
+if command -v lsof >/dev/null 2>&1; then
+  PID="$(lsof -ti :${PORT} || true)"
+  [[ -n "${PID}" ]] && kill "${PID}" || true
+fi
+
+nohup "${PYTHON}" -m uvicorn bookshelf_pdf_server:app --host "${HOST}" --port "${PORT}" \
+  --app-dir "$HOME/FineTuningAI/bin" >"${LOG}" 2>&1 &
+
+sleep 0.6
+xdg-open "http://${HOST}:${PORT}/" >/dev/null 2>&1 || true
+echo "Bookshelf PDF UI: http://${HOST}:${PORT}/"
+echo "Log: ${LOG}"

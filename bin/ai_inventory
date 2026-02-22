@@ -43,13 +43,21 @@ OUT="$HOME/FineTuningAI/AI_INVENTORY.md"
   echo "- Always run 'git status' before modifying scripts."
   echo "- Commit and push after structural or architectural changes."
   echo "- Never overwrite working scripts without versioning."
-  echo "- Bookshelf must be launched via: bin/bookshelf_launch."
+  echo "- Bookshelf must be launched via: bin/bookshelf_start (FastAPI 8787 service wrapper)."
   echo "- PDFs = reading UI; TXTs = AI ingestion corpus."
   echo "- Corpus flow: ingest → index → query."
   echo
 
   echo "## Bookshelf Wiring"
   echo
+  echo "- Bookshelf UI served by: $HOME/FineTuningAI/bookshelf_app/ui/index.html"
+  echo "- Bookshelf server: $HOME/FineTuningAI/bin/bookshelf_pdf_server.py (uvicorn on 127.0.0.1:8787)"
+  echo "- Bookshelf DB: $HOME/FineTuningAI/bookshelf_app/catalog.sqlite (table: pdfs)"
+  echo "- Reindexer: $HOME/FineTuningAI/bin/bookshelf_reindex.py (populates catalog.sqlite)"
+  echo "- Port: 8787 (local only)"
+  echo "- Routes: / redirects to /_bookshelf/ ; JSON index at /api/index"
+  echo "- Static UI mount: app.mount("/_bookshelf", StaticFiles(...))"
+
   echo "- Desktop file: $HOME/Desktop/Bookshelf.desktop"
   echo "- Desktop Exec line:"
   if [ -f "$HOME/Desktop/Bookshelf.desktop" ]; then
@@ -58,37 +66,18 @@ OUT="$HOME/FineTuningAI/AI_INVENTORY.md"
     echo "NOT FOUND"
   fi
   echo
-  echo "- Launcher present:"
+  echo "- Launcher present (expected):"
   [ -f "$HOME/FineTuningAI/bin/bookshelf_launch" ] && echo "yes" || echo "no"
   echo
 
   echo "## Library Roots (Bookshelf vs Corpus)"
   echo
-
-  BOOKSHELF_SERVER="$HOME/FineTuningAI/bin/bookshelf_server.py"
-  if [ -f "$BOOKSHELF_SERVER" ]; then
-    LIBROOT=$(python3 - <<'PY'
-import re, pathlib, os
-p = pathlib.Path.home()/"FineTuningAI/bin/bookshelf_server.py"
-txt = p.read_text(encoding="utf-8", errors="ignore")
-m = re.search(r'LIBRARY_ROOT\s*=\s*os\.path\.expanduser\("([^"]+)"\)', txt)
-print(m.group(1) if m else "")
-PY
-)
-    if [ -n "$LIBROOT" ]; then
-      LIBROOT_EXPANDED=$(python3 - <<PY
-import os
-print(os.path.expanduser("$LIBROOT"))
-PY
-)
-      echo "- Bookshelf LIBRARY_ROOT: $LIBROOT_EXPANDED"
-      echo "- Bookshelf LIBRARY_ROOT realpath: $(realpath "$LIBROOT_EXPANDED" 2>/dev/null || echo "n/a")"
-      echo "- Bookshelf LIBRARY_ROOT size: $(du -sh "$LIBROOT_EXPANDED" 2>/dev/null | awk '{print $1}' || echo "n/a")"
-      echo "- Bookshelf PDF count: $(find "$LIBROOT_EXPANDED" -type f -iname "*.pdf" 2>/dev/null | wc -l)"
-      echo "- Bookshelf TXT count: $(find "$LIBROOT_EXPANDED" -type f -iname "*.txt" 2>/dev/null | wc -l)"
-      echo
-    fi
-  fi
+  echo "- Bookshelf PDF library root: /ai_data/ebooks"
+  echo "  - realpath: $(realpath /ai_data/ebooks 2>/dev/null || echo "n/a")"
+  echo "  - size: $(du -sh /ai_data/ebooks 2>/dev/null | awk '{print $1}' || echo "n/a")"
+  echo "  - pdf: $(find /ai_data/ebooks -type f -iname '*.pdf' 2>/dev/null | wc -l)"
+  echo "  - txt: $(find /ai_data/ebooks -type f -iname '*.txt' 2>/dev/null | wc -l)"
+  echo
 
   echo "### Corpus candidates"
   CANDIDATES=(
