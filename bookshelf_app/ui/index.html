@@ -1,0 +1,859 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bookshelf</title>
+
+    <style>
+      :root {
+        --bg: #ffffff;
+        --border: #e6e6e6;
+        --muted: #666;
+        --text: #111;
+        --panel: #fafafa;
+        --shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+        --radius: 14px;
+      }
+
+      body {
+        margin: 0;
+        font-family:
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          Arial,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      header {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      header .title {
+        font-weight: 900;
+        font-size: 18px;
+        letter-spacing: 0.2px;
+      }
+
+      header input {
+        flex: 1;
+        padding: 9px 12px;
+        border: 1px solid #cfcfcf;
+        border-radius: 12px;
+      }
+
+      header .right {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .pillbtn {
+        padding: 8px 10px;
+        border: 1px solid #cfcfcf;
+        border-radius: 999px;
+        background: white;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      .pillbtn:hover {
+        border-color: #a9a9a9;
+      }
+      .pillbtn.active {
+        border-color: #666;
+        box-shadow: var(--shadow);
+      }
+
+      main {
+        display: grid;
+        height: calc(100vh - 54px);
+        min-height: 0;
+      }
+
+      body.mode-normal main {
+        grid-template-columns: 280px minmax(600px, 1.2fr) 2fr;
+      }
+      body.mode-shelf main {
+        grid-template-columns: 280px 1fr 520px;
+      }
+      body.mode-shelfmax main {
+        grid-template-columns: 0px 1fr 0px;
+      }
+
+      body.mode-shelfmax .pane:first-child {
+        display: none;
+      }
+      body.mode-shelfmax .pane:last-child {
+        display: none;
+      }
+
+      .pane {
+        overflow: auto;
+        min-height: 0;
+        min-width: 0;
+        border-right: 1px solid var(--border);
+      }
+      .pane:last-child {
+        border-right: 0;
+      }
+
+      /* Left: filters */
+      .filters {
+        padding: 12px;
+        display: grid;
+        gap: 10px;
+      }
+      .filters .box {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px;
+      }
+      .filters .box h3 {
+        margin: 0 0 8px 0;
+        font-size: 12px;
+        color: var(--muted);
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      select {
+        width: 100%;
+        padding: 9px 10px;
+        border: 1px solid #cfcfcf;
+        border-radius: 12px;
+        background: white;
+      }
+
+      /* Middle: list view */
+      .list {
+        padding: 12px;
+      }
+      .row {
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        margin-bottom: 10px;
+        cursor: pointer;
+        background: white;
+      }
+      .row:hover {
+        border-color: #c7c7c7;
+        box-shadow: var(--shadow);
+      }
+      .row .t {
+        font-weight: 800;
+      }
+      .row .m {
+        color: #555;
+        font-size: 12px;
+        margin-top: 4px;
+      }
+
+      /* Middle: bookshelf view */
+      .shelfWrap {
+        padding: 14px;
+      }
+      .shelfTopBar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .shelfNote {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .shelf {
+        background:
+          linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.55),
+            rgba(255, 255, 255, 0) 28%
+          ),
+          repeating-linear-gradient(
+            90deg,
+            rgba(120, 80, 40, 0.18) 0px,
+            rgba(120, 80, 40, 0.18) 10px,
+            rgba(90, 60, 30, 0.18) 14px,
+            rgba(120, 80, 40, 0.18) 22px
+          ),
+          linear-gradient(
+            180deg,
+            rgba(120, 78, 38, 0.22),
+            rgba(90, 58, 28, 0.22)
+          );
+        border: 1px solid rgba(0, 0, 0, 0.1);
+        border-radius: 18px;
+        padding: 14px 14px 18px 14px;
+        box-shadow: var(--shadow);
+        min-height: 280px;
+      }
+
+      /* IMPORTANT: this fixes the single-column issue */
+      .spines {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: flex-end;
+      }
+
+      .spine {
+        width: 34px;
+        border-radius: 9px;
+        border: 1px solid rgba(0, 0, 0, 0.22);
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+
+        box-shadow:
+          0 8px 14px rgba(0, 0, 0, 0.08),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+
+        background:
+          linear-gradient(
+            90deg,
+            color-mix(in srgb, var(--spineBase) 90%, white 10%),
+            color-mix(in srgb, var(--spineBase) 78%, white 22%) 50%,
+            color-mix(in srgb, var(--spineBase) 90%, white 10%)
+          ),
+          var(--spineTex);
+
+        background-size:
+          auto,
+          220px 220px;
+        background-blend-mode: normal, overlay;
+
+        transform: translateY(0) translateX(0);
+        transition:
+          transform 0.1s ease,
+          box-shadow 0.1s ease,
+          filter 0.1s ease;
+      }
+
+      .spine:hover {
+        transform: translateY(-5px) translateX(6px);
+        filter: saturate(1.06) contrast(1.02);
+        box-shadow:
+          0 16px 26px rgba(0, 0, 0, 0.16),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+      }
+
+      /* subtle “cap” at top/bottom like binding */
+      .spine::before,
+      .spine::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 18px;
+        background: rgba(255, 255, 255, 0.22);
+        pointer-events: none;
+      }
+      .spine::before {
+        top: 0;
+      }
+      .spine::after {
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.06);
+      }
+
+      /* Center text block inside spine */
+      .spineText {
+        position: absolute;
+        inset: 6px 4px 6px 4px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+        pointer-events: none;
+      }
+
+      .spineTitle,
+      .spineAuthor {
+        writing-mode: vertical-rl;
+        text-orientation: mixed;
+        transform: rotate(180deg);
+        text-align: center;
+        color: rgba(0, 0, 0, 0.9);
+        text-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.75),
+          0 -1px 0 rgba(0, 0, 0, 0.18);
+      }
+
+      .spineTitle {
+        font-weight: 800;
+        font-size: 11px;
+        line-height: 1.05;
+        letter-spacing: 0.3px;
+        background: rgba(255, 255, 255, 0.22);
+        border-radius: 10px;
+        padding: 6px 4px;
+      }
+
+      .spineAuthor {
+        font-size: 11px;
+        opacity: 0.85;
+        background: rgba(255, 255, 255, 0.18);
+        border-radius: 10px;
+        padding: 6px 4px;
+      }
+
+      .shelfBoard {
+        margin-top: 14px;
+        height: 16px;
+        border-radius: 999px;
+        background: linear-gradient(
+          180deg,
+          rgba(0, 0, 0, 0.1),
+          rgba(0, 0, 0, 0.03)
+        );
+        border: 1px solid rgba(0, 0, 0, 0.06);
+      }
+
+      /* Right: reader */
+      .reader {
+        padding: 12px;
+        height: 100%;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .badge {
+        display: inline-block;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 12px;
+        margin-right: 6px;
+        background: white;
+      }
+
+      .topline {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      button {
+        padding: 8px 10px;
+        border: 1px solid #cfcfcf;
+        border-radius: 12px;
+        background: white;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: #a9a9a9;
+      }
+
+      .hr {
+        border: 0;
+        border-top: 1px solid var(--border);
+        margin: 12px 0;
+      }
+
+      .modeHidden {
+        display: none;
+      }
+
+      iframe {
+        width: 100%;
+        height: 100%;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: white;
+      }
+    </style>
+  </head>
+
+  <body>
+    <header>
+      <div class="title">Bookshelf</div>
+      <input id="q" placeholder="Search title/author/path…" />
+      <div class="right">
+        <button class="pillbtn active" id="btnShelf">Shelf</button>
+        <button class="pillbtn" id="btnList">List</button>
+        <button
+          class="pillbtn"
+          id="layoutBtn"
+          title="Cycle layout: normal → shelf → shelf max"
+        >
+          Layout
+        </button>
+        <div class="muted" id="count">Loading…</div>
+      </div>
+    </header>
+
+    <main>
+      <!-- LEFT -->
+      <div class="pane">
+        <div class="filters">
+          <div class="box">
+            <h3>Filters</h3>
+            <select id="trad"></select>
+            <div style="height: 10px"></div>
+            <select id="source"></select>
+            <div style="height: 10px"></div>
+            <select id="lang"></select>
+            <div style="height: 10px"></div>
+            <select id="status"></select>
+          </div>
+
+          <div class="box">
+            <h3>Display</h3>
+            <div class="muted" id="displayNote">
+              Shelf view shows a capped number of spines for speed.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MIDDLE: SHELF VIEW -->
+      <div class="pane" id="paneShelf">
+        <div class="shelfWrap">
+          <div class="shelfTopBar">
+            <div class="shelfNote" id="shelfNote">Loading…</div>
+            <div>
+              <button
+                id="shuffleBtn"
+                title="Reorder spines (deterministic by default)"
+              >
+                Shuffle
+              </button>
+            </div>
+          </div>
+
+          <div class="shelf">
+            <div class="spines" id="spines"></div>
+            <div class="shelfBoard"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MIDDLE: LIST VIEW -->
+      <div class="pane modeHidden" id="paneList">
+        <div class="list" id="list"></div>
+      </div>
+
+      <!-- RIGHT -->
+      <div class="pane">
+        <div class="reader">
+          <div class="topline">
+            <div>
+              <div id="rt" style="font-weight: 900; font-size: 16px">
+                Select a book
+              </div>
+              <div class="muted" id="rp"></div>
+            </div>
+            <div style="display: flex; gap: 8px">
+              <button id="copyBtn" disabled>Copy path</button>
+              <button id="openBtn" disabled>Open reader</button>
+            </div>
+          </div>
+
+          <div id="badges"></div>
+          <div class="hr"></div>
+
+          <div style="flex: 1; min-height: 0">
+            <iframe id="pdfFrame" title="PDF preview"></iframe>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      let INDEX = [];
+      let FILTERED = [];
+      let SELECTED = null;
+
+      let VIEW = "shelf";
+      const SHELF_MAX = 50000;
+      let SHUFFLED = false;
+
+      const el = (id) => document.getElementById(id);
+
+      const LAYOUTS = ["mode-normal", "mode-shelf", "mode-shelfmax"];
+      let LAYOUT_IDX = 0;
+
+      function applyLayout() {
+        document.body.classList.remove(...LAYOUTS);
+        document.body.classList.add(LAYOUTS[LAYOUT_IDX]);
+      }
+
+      function setupLayoutButton() {
+        const btn = el("layoutBtn");
+        if (!btn) return;
+        btn.onclick = () => {
+          LAYOUT_IDX = (LAYOUT_IDX + 1) % LAYOUTS.length;
+          applyLayout();
+        };
+        applyLayout();
+      }
+
+      function uniq(arr) {
+        return Array.from(new Set(arr)).sort((a, b) => a.localeCompare(b));
+      }
+
+      function fillSelect(sel, values, label) {
+        sel.innerHTML = "";
+        const opt0 = document.createElement("option");
+        opt0.value = "";
+        opt0.textContent = `All ${label}`;
+        sel.appendChild(opt0);
+
+        for (const v of values) {
+          const o = document.createElement("option");
+          o.value = v;
+          o.textContent = v;
+          sel.appendChild(o);
+        }
+      }
+
+      function setText(node, text) {
+        node.textContent = text == null ? "" : String(text);
+      }
+
+      function hash32(str) {
+        let h = 2166136261;
+        for (let i = 0; i < str.length; i++) {
+          h ^= str.charCodeAt(i);
+          h = Math.imul(h, 16777619);
+        }
+        return h >>> 0;
+      }
+
+      function inferAuthor(e) {
+        const a = (e.author || "").trim();
+        if (a) return a;
+
+        // Try parse from filename: "Title - Author, 2007 (157p).pdf"
+        const p = (e.pdf_path || e.rel_path || "").toString();
+        const file = p.split("/").pop() || "";
+        const base = file.replace(/\.(pdf|epub|djvu|txt)$/i, "").trim();
+
+        const parts = base.split(" - ");
+        if (parts.length >= 2) {
+          const right = parts.slice(1).join(" - ").trim();
+          // take up to first comma if present
+          const comma = right.indexOf(",");
+          const guess = (comma >= 0 ? right.slice(0, comma) : right).trim();
+          if (guess && guess.length >= 2) return guess;
+        }
+        return "";
+      }
+
+      function inferSeriesFromPath(e) {
+        const p = (e.rel_path || e.pdf_path || "").toString();
+        if (!p) return "";
+
+        const parts = p.split("/").filter(Boolean);
+
+        const bad = new Set([
+          "pdf",
+          "PDF",
+          "scans",
+          "Scan",
+          "Scans",
+          "_incoming",
+          "_imports",
+          "_digested",
+        ]);
+
+        const volIdx = parts.findIndex((s) => /^vol[_\s-]*\d+/i.test(s));
+        if (volIdx > 0) {
+          const candidate = parts[volIdx - 1];
+          if (candidate && !bad.has(candidate)) return candidate;
+        }
+
+        for (let i = parts.length - 1; i >= 0; i--) {
+          const seg = parts[i];
+          if (seg.includes(".")) continue;
+          if (bad.has(seg)) continue;
+          if (/^vol[_\s-]*\d+/i.test(seg)) continue;
+          return seg;
+        }
+
+        return "";
+      }
+
+      function prettyFolderName(s) {
+        return (s || "").replace(/_+/g, " ").replace(/\s+/g, " ").trim();
+      }
+
+      function displayTitle(e) {
+        let t = (e.spine_title || e.title || "").trim();
+
+        t = t.replace(/\.(pdf|epub|djvu|txt)$/gi, "");
+        t = t.replace(/_+/g, " ");
+        t = t.replace(/\[[^\]]*\]/g, "");
+        t = t.replace(/\([^\)]*\)/g, "");
+        t = t.replace(/\s+/g, " ").trim();
+
+        const volMatch = t.match(/^(vol(?:ume)?\.?\s*\d+)/i);
+        if (volMatch) {
+          const volPart = volMatch[1];
+          const seriesRaw = inferSeriesFromPath(e);
+          const series = prettyFolderName(seriesRaw);
+          if (series.length > 3) t = `${series} — ${volPart}`;
+        }
+
+        return t || "(untitled)";
+      }
+
+      function spineStyleFor(e) {
+        const key = `${e.title}|${inferAuthor(e)}|${e.rel_path || e.pdf_path || ""}`;
+        const h = hash32(key);
+        const hue = h % 360;
+        const sat = 28 + (h % 18);
+        const light = 78 - (h % 14);
+        const bg = `hsl(${hue} ${sat}% ${light}%)`;
+        const height = 210 + (h % 55);
+        return { bg, height };
+      }
+
+      function applyFilters() {
+        const q = el("q").value.trim().toLowerCase();
+        const trad = el("trad").value;
+        const source = el("source").value;
+        const lang = el("lang").value;
+        const status = el("status").value;
+
+        FILTERED = INDEX.filter((e) => {
+          if (trad && (e.tradition || "Unknown") !== trad) return false;
+          if (source && (e.source || "Unknown") !== source) return false;
+          if (lang && (e.language || "Unknown") !== lang) return false;
+          if (status && (e.status || "Unknown") !== status) return false;
+
+          if (q) {
+            const hay =
+              `${e.title || ""} ${inferAuthor(e)} ${e.rel_path || ""} ${e.pdf_path || ""}`.toLowerCase();
+            if (!hay.includes(q)) return false;
+          }
+          return true;
+        });
+
+        el("count").textContent = `${FILTERED.length.toLocaleString()} items`;
+        render();
+      }
+
+      function render() {
+        if (VIEW === "list") renderList();
+        else renderShelf();
+      }
+
+      function renderList() {
+        const list = el("list");
+        list.innerHTML = "";
+
+        const max = 400;
+        const slice = FILTERED.slice(0, max);
+
+        for (const e of slice) {
+          const div = document.createElement("div");
+          div.className = "row";
+
+          const t = document.createElement("div");
+          t.className = "t";
+          setText(t, displayTitle(e));
+
+          const m1 = document.createElement("div");
+          m1.className = "m";
+          setText(
+            m1,
+            `${inferAuthor(e) || "Unknown"} · ${e.language || "Unknown"} · ${e.status || "Unknown"}`,
+          );
+
+          const m2 = document.createElement("div");
+          m2.className = "m";
+          setText(m2, e.pdf_path || e.rel_path || "");
+
+          div.appendChild(t);
+          div.appendChild(m1);
+          div.appendChild(m2);
+
+          div.onclick = () => loadEntry(e);
+          list.appendChild(div);
+        }
+
+        if (FILTERED.length > max) {
+          const more = document.createElement("div");
+          more.className = "muted";
+          more.textContent = `Showing first ${max}. Refine search to narrow.`;
+          list.appendChild(more);
+        }
+      }
+
+      function renderShelf() {
+        const sp = el("spines");
+        sp.innerHTML = "";
+
+        let slice = FILTERED.slice(0, SHELF_MAX);
+
+        if (SHUFFLED) {
+          slice = slice
+            .slice()
+            .sort((a, b) => hash32(a.id || "") - hash32(b.id || ""))
+            .reverse();
+        }
+
+        el("shelfNote").textContent =
+          `Showing ${slice.length.toLocaleString()} spines (cap=${SHELF_MAX.toLocaleString()}). Refine filters/search to browse.`;
+
+        for (const e of slice) {
+          const d = document.createElement("div");
+          d.className = "spine";
+
+          const st = spineStyleFor(e);
+          d.style.setProperty("--spineBase", st.bg);
+          d.style.height = st.height + "px";
+
+          const w = 28 + (hash32(e.id || "") % 17);
+          d.style.width = w + "px";
+
+          const tex =
+            hash32(e.id || "") % 3 === 0
+              ? 'url("/_bookshelf/assets/tex_leather.png")'
+              : 'url("/_bookshelf/assets/tex_cloth.png")';
+          d.style.setProperty("--spineTex", tex);
+
+          d.title = `${displayTitle(e)}\n${inferAuthor(e)}\n${e.pdf_path || e.rel_path || ""}`;
+
+          const box = document.createElement("div");
+          box.className = "spineText";
+
+          const title = document.createElement("div");
+          title.className = "spineTitle";
+          title.textContent = displayTitle(e);
+
+          box.appendChild(title);
+
+          const aName = inferAuthor(e);
+          if (aName) {
+            const a = document.createElement("div");
+            a.className = "spineAuthor";
+            a.textContent = aName;
+            box.appendChild(a);
+          }
+
+          d.appendChild(box);
+
+          d.onclick = (ev) => {
+            if (ev.shiftKey) return loadEntry(e); // Shift+click = embedded pane
+            window.open(
+              `/view?id=${encodeURIComponent(e.id)}`,
+              "_blank",
+              "noopener,noreferrer",
+            );
+          };
+
+          sp.appendChild(d);
+        }
+      }
+
+      async function loadEntry(e) {
+        SELECTED = e;
+
+        el("rt").textContent = displayTitle(e);
+        el("rp").textContent = e.pdf_path || e.rel_path || "";
+
+        el("badges").innerHTML = `
+          <span class="badge">${inferAuthor(e) || "Unknown"}</span>
+          <span class="badge">${e.language || "Unknown"}</span>
+          <span class="badge">${e.status || "Unknown"}</span>
+        `;
+
+        el("copyBtn").disabled = false;
+        el("copyBtn").onclick = async () => {
+          await navigator.clipboard.writeText(e.pdf_path || e.rel_path || "");
+        };
+
+        el("openBtn").disabled = false;
+        el("openBtn").onclick = () =>
+          window.open(
+            `/view?id=${encodeURIComponent(e.id)}`,
+            "_blank",
+            "noopener,noreferrer",
+          );
+
+        el("pdfFrame").src = `/api/pdf?id=${encodeURIComponent(e.id)}`;
+      }
+
+      function setView(v) {
+        VIEW = v;
+        el("btnShelf").classList.toggle("active", v === "shelf");
+        el("btnList").classList.toggle("active", v === "list");
+        el("paneShelf").classList.toggle("modeHidden", v !== "shelf");
+        el("paneList").classList.toggle("modeHidden", v !== "list");
+        render();
+      }
+
+      async function boot() {
+        const r = await fetch("/api/index");
+        const data = await r.json();
+        INDEX = data.entries || [];
+
+        fillSelect(
+          el("trad"),
+          uniq(INDEX.map((e) => e.tradition || "Unknown")),
+          "traditions",
+        );
+        fillSelect(
+          el("source"),
+          uniq(INDEX.map((e) => e.source || "Unknown")),
+          "sources",
+        );
+        fillSelect(
+          el("lang"),
+          uniq(INDEX.map((e) => e.language || "Unknown")),
+          "languages",
+        );
+        fillSelect(
+          el("status"),
+          uniq(INDEX.map((e) => e.status || "Unknown")),
+          "statuses",
+        );
+
+        ["trad", "source", "lang", "status"].forEach((id) =>
+          el(id).addEventListener("change", applyFilters),
+        );
+
+        el("q").addEventListener("input", () => {
+          window.clearTimeout(window._t);
+          window._t = setTimeout(applyFilters, 120);
+        });
+
+        el("btnShelf").addEventListener("click", () => setView("shelf"));
+        el("btnList").addEventListener("click", () => setView("list"));
+
+        el("shuffleBtn").addEventListener("click", () => {
+          SHUFFLED = !SHUFFLED;
+          renderShelf();
+        });
+
+        FILTERED = INDEX;
+        applyFilters();
+      }
+
+      setupLayoutButton();
+      boot();
+    </script>
+  </body>
+</html>
