@@ -30,3 +30,9 @@ bookshelf_app/catalog.sqlite
 bookshelf_app/overrides.json
 bookshelf_app/ui/index.html.bak*
 
+
+# Bookshelf runtime artifacts
+bookshelf_app/catalog.sqlite
+bookshelf_app/overrides.json
+bookshelf_app/ui/index.html.bak*
+bookshelf_app/ui/index.html.bak.*
