@@ -382,7 +382,13 @@
         background: white;
       }
     </style>
-  </head>
+  
+<style id="bs-spine-debug-css">
+  .spine { outline: 2px solid rgba(255,0,0,0.35); outline-offset: 2px; }
+  .spine:hover { outline-color: rgba(0,255,120,0.75); }
+</style>
+
+</head>
 
   <body>
     <header>
@@ -854,6 +860,242 @@
 
       setupLayoutButton();
       boot();
-    </script>
-  </body>
+    
+// BS right-click editor loaded
+
+
+
+</script>
+  
+<!-- BS RC EDIT (autopatch) -->
+
+  <div style="position:relative; max-width:620px; margin:10vh auto; background:#111; color:#eee; border:1px solid rgba(255,255,255,0.15); border-radius:14px; padding:16px; box-shadow:0 20px 60px rgba(0,0,0,0.6);">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+      <div style="font-weight:800; font-size:16px;">Right-click editor is LIVE</div>
+      <button id="bs-edit-close" style="background:transparent; color:#eee; border:1px solid rgba(255,255,255,0.25); border-radius:12px; padding:6px 10px; cursor:pointer;">Close</button>
+    </div>
+    <div style="margin-top:10px; font-size:13px; opacity:0.9;">
+      You should be seeing this because we intercepted <code>contextmenu</code>.
+    </div>
+  </div>
+</div>
+
+
+
+<!-- BS RC EDIT MODAL TAILFIX (autopatch) -->
+
+<!-- BS RC EDIT MODAL (spine editor) -->
+<div id="bs-edit-modal" style="display:none; position:fixed; inset:0; z-index:99999;">
+  <div id="bs-edit-backdrop" style="position:absolute; inset:0; background:rgba(0,0,0,0.45);"></div>
+
+  <div style="position:relative; max-width:860px; margin:6vh auto; background:#111; color:#eee;
+              border:1px solid rgba(255,255,255,0.15); border-radius:14px; padding:16px;
+              box-shadow:0 20px 60px rgba(0,0,0,0.6);">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+      <div style="font-weight:800; font-size:16px;">Edit spine metadata (local overrides)</div>
+      <button id="bs-edit-close"
+        style="background:transparent; color:#eee; border:1px solid rgba(255,255,255,0.25);
+               border-radius:12px; padding:6px 10px; cursor:pointer;">Close</button>
+    </div>
+
+    <div style="margin-top:10px; font-size:12px; opacity:0.9; line-height:1.35;">
+      <div><span style="opacity:0.8;">Detected title:</span> <span id="bs-detected-title"></span></div>
+      <div><span style="opacity:0.8;">Detected path:</span> <code id="bs-detected-path" style="color:#b7e1ff;"></code></div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px;">
+      <label style="display:block;">
+        <div style="font-size:12px; opacity:0.85; margin-bottom:4px;">Override Title</div>
+        <input id="bs-ov-title" type="text"
+          style="width:100%; padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.18);
+                 background:#0b0b0b; color:#eee;">
+      </label>
+      <label style="display:block;">
+        <div style="font-size:12px; opacity:0.85; margin-bottom:4px;">Override Author</div>
+        <input id="bs-ov-author" type="text"
+          style="width:100%; padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.18);
+                 background:#0b0b0b; color:#eee;">
+      </label>
+    </div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:12px;">
+      <div style="display:flex; gap:10px;">
+        <button id="bs-ov-save"
+          style="background:#1f6feb; border:none; color:#fff; border-radius:10px; padding:10px 14px; cursor:pointer;">
+          Save (local)
+        </button>
+        <button id="bs-ov-clear"
+          style="background:transparent; border:1px solid rgba(255,255,255,0.25); color:#eee; border-radius:10px;
+                 padding:10px 14px; cursor:pointer;">
+          Clear override
+        </button>
+      </div>
+      <div id="bs-ov-status" style="font-size:12px; opacity:0.9;"></div>
+    </div>
+  </div>
+</div>
+
+
+<script id="bs-rc-edit-script">
+(function(){
+  const LS_KEY = "bookshelf_overrides_v1";
+  let OV = {};
+  try { OV = JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch(e) { OV = {}; }
+  function saveOV(){ localStorage.setItem(LS_KEY, JSON.stringify(OV)); }
+
+  function findPdfPath(el){
+    if(!el) return "";
+    for (const a of el.attributes || []) {
+      const v = (a.value || "").trim();
+      if (!v) continue;
+      if (v.includes("/ai_data/") || v.toLowerCase().endsWith(".pdf")) return v;
+    }
+    const p = el.parentElement;
+    if(p){
+      for (const a of p.attributes || []) {
+        const v = (a.value || "").trim();
+        if (!v) continue;
+        if (v.includes("/ai_data/") || v.toLowerCase().endsWith(".pdf")) return v;
+      }
+    }
+    return "";
+  }
+
+  function detectedTitle(spine){
+    return (spine && (spine.getAttribute("title") || spine.title || "")) || "";
+  }
+
+  function keyFor(spine){
+    const p = findPdfPath(spine);
+    if (p) return "path:" + p;
+    const t = detectedTitle(spine);
+    return "title:" + t;
+  }
+
+  function applyOverrideToSpine(spine){
+    if(!spine) return;
+    const k = keyFor(spine);
+    const o = OV[k];
+    if(!o) return;
+    if(o.title && o.title.trim()){
+      spine.setAttribute("title", o.title.trim());
+    }
+  }
+
+  function setStatus(msg, ok=true){
+    const st = document.getElementById("bs-ov-status");
+    if(!st) return;
+    st.textContent = msg || "";
+    st.style.color = ok ? "#b6fcb6" : "#ffb6b6";
+  }
+
+  function openEditorFor(spine){
+    const modal = document.getElementById("bs-edit-modal");
+    if(!modal){ console.warn("bs-edit-modal missing"); return; }
+
+    modal._spine = spine;
+
+    const t = detectedTitle(spine);
+    const p = findPdfPath(spine);
+    const k = keyFor(spine);
+    const o = OV[k] || {};
+
+    document.getElementById("bs-detected-title").textContent = t || "(none)";
+    document.getElementById("bs-detected-path").textContent = p || "(not detected)";
+
+    document.getElementById("bs-ov-title").value = o.title || "";
+    document.getElementById("bs-ov-author").value = o.author || "";
+
+    modal.style.display = "block";
+    setStatus("Editing overrides (stored in this browser).", true);
+    document.getElementById("bs-ov-title").focus();
+  }
+
+  function closeEditor(){
+    const modal = document.getElementById("bs-edit-modal");
+    if(modal) modal.style.display = "none";
+    setStatus("");
+  }
+
+  function bestSpineFromEventTarget(t){
+    // 1) the obvious case
+    let spine = t && t.closest && t.closest(".spine");
+    if(spine) return spine;
+
+    // 2) click landed on children (title/author/text)
+    spine = t && t.closest && t.closest(".spineTitle, .spineAuthor, .spineText");
+    if(spine) return spine.closest(".spine") || spine;
+
+    // 3) sometimes spine might be a div with a title attribute
+    spine = t && t.closest && t.closest('div[title]');
+    if(spine && (spine.classList.contains("spine") || spine.style.getPropertyValue("--spineBase"))) return spine;
+
+    return null;
+  }
+
+  function wire(){
+    const modal = document.getElementById("bs-edit-modal");
+    const backdrop = document.getElementById("bs-edit-backdrop");
+    const closeBtn = document.getElementById("bs-edit-close");
+    const saveBtn = document.getElementById("bs-ov-save");
+    const clearBtn = document.getElementById("bs-ov-clear");
+
+    closeBtn && closeBtn.addEventListener("click", closeEditor);
+    backdrop && backdrop.addEventListener("click", closeEditor);
+
+    saveBtn && saveBtn.addEventListener("click", ()=>{
+      const spine = modal && modal._spine;
+      if(!spine){ setStatus("No spine selected.", false); return; }
+      const k = keyFor(spine);
+      OV[k] = {
+        title: (document.getElementById("bs-ov-title").value || "").trim(),
+        author: (document.getElementById("bs-ov-author").value || "").trim(),
+        updated_at: new Date().toISOString(),
+      };
+      saveOV();
+      applyOverrideToSpine(spine);
+      setStatus("Saved locally.", true);
+    });
+
+    clearBtn && clearBtn.addEventListener("click", ()=>{
+      const spine = modal && modal._spine;
+      if(!spine){ setStatus("No spine selected.", false); return; }
+      const k = keyFor(spine);
+      delete OV[k];
+      saveOV();
+      setStatus("Cleared override (refresh to restore original tooltip if needed).", true);
+    });
+
+    // Apply overrides to any spines already rendered
+    document.querySelectorAll(".spine").forEach(applyOverrideToSpine);
+
+    // DEBUG + intercept only when we truly hit a spine-ish element
+    document.addEventListener("click", function(ev){
+  if(!ev.shiftKey) return;
+  const s = ev.target.closest && ev.target.closest(".spine");
+  console.log("BS SHIFT+CLICK target=", ev.target, " spine=", s);
+}, true);
+
+document.addEventListener("contextmenu", function(ev){
+      const spine = bestSpineFromEventTarget(ev.target);
+      console.log("BS contextmenu target=", ev.target, " spine=", spine);
+      if(!spine) return; // normal menu elsewhere
+      ev.preventDefault();
+      openEditorFor(spine);
+    }, true);
+
+    console.log("BS SPINE EDITOR LOADED (debug matcher)");
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", wire, { once: true });
+  } else {
+    wire();
+  }
+})();
+</script>
+
+
+
+</body>
 </html>
