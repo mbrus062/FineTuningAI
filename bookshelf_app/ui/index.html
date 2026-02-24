@@ -762,6 +762,12 @@
           d.appendChild(box);
 
           d.onclick = (ev) => {
+            // BS FORCE SERVER SAVE: keep absolute pdf path on spine element
+            try {
+              d.dataset.abs = (e.pdf_path || e.rel_path || '');
+              d.setAttribute('data-abs', (e.pdf_path || e.rel_path || ''));
+            } catch(_e) {}
+
             if (ev.shiftKey) return loadEntry(e); // Shift+click = embedded pane
             window.open(
               `/view?id=${encodeURIComponent(e.id)}`,
@@ -865,6 +871,172 @@
 
 
 
+
+// BS SERVER SAVE MODALPATH v1 (autopatch)
+(function(){
+  const modal = document.getElementById("bs-edit-modal");
+  if(!modal){ console.warn("BS: modal not found"); return; }
+
+  // Helper: try hard to get an absolute pdf path from a spine element
+  function getAbsPdfPathFromSpineEl(el){
+    if(!el) return "";
+    // common attributes we have seen
+    const candidates = [
+      el.getAttribute("data-path"),
+      el.getAttribute("data1"),
+      (el.dataset ? (el.dataset.path || el.dataset.pdfPath || el.dataset.pdf_path || el.dataset.pdfpath) : "")
+    ].filter(Boolean);
+
+    for(const c of candidates){
+      const s = String(c).trim();
+      if(s.startsWith("/") && s.toLowerCase().includes(".pdf")) return s;
+      // If attribute is a blob of text, try to extract /...pdf (allow spaces)
+      const m = s.match(/(\/ai_data\/ebooks\/[^\n\r]+?\.pdf)/i) || s.match(/(\/[^\n\r]+?\.pdf)/i);
+      if(m && m[1] && m[1].startsWith("/")) return m[1].trim();
+    }
+    return "";
+  }
+
+  // Capture the last spine right-clicked and store absolute path directly on the modal
+  document.addEventListener("contextmenu", (ev)=>{
+    try{
+      const spine = ev.target && ev.target.closest ? ev.target.closest(".spine") : null;
+      if(!spine) return;
+      const p = getAbsPdfPathFromSpineEl(spine);
+      if(p){
+        modal.dataset.pdfPath = p;
+        // also store the spine element so we can update it after save
+        window.__BS_LAST_SPINE_EL = spine;
+        // BS ABS PATH CAPTURE v4 (autopatch)
+        try {
+          // Sometimes the contextmenu target is weird (header, overlay, etc).
+          // Fallback to elementFromPoint so we still land on the spine.
+          let s = spine;
+          if (!s || !s.classList || !s.classList.contains("spine")) {
+            const el = document.elementFromPoint(ev.clientX, ev.clientY);
+            s = el && el.closest ? el.closest(".spine") : null;
+            if (s) {
+              window.__BS_LAST_SPINE_EL = s;
+              console.log("BS ABS CAP v4: recovered spine via elementFromPoint()");
+            }
+          }
+
+          const t = (window.__BS_LAST_SPINE_EL?.innerText || window.__BS_LAST_SPINE_EL?.textContent || "")
+                      .replace(/\s+/g, " ").trim();
+          const m = t.match(/(\/ai_data\/ebooks\/.*?\.pdf)/);
+          if (m && m[1]) {
+            window.__BS_OV_ABS_PATH = m[1];
+            console.log("BS ABS PATH CAPTURED v4:", window.__BS_OV_ABS_PATH);
+          } else {
+            console.warn("BS ABS PATH CAP v4: no match in spine text:", t.slice(0, 220));
+          }
+        } catch (e) {
+          console.warn("BS ABS PATH CAP v4 error:", e);
+        }
+
+
+
+        // BS ABS PATH CAPTURE v1 (autopatch)
+        try {
+          const t = (spine.getAttribute("title") || "");
+          // title contains lines; last line includes absolute pdf path
+          const m = t.match(/(\/.*?\.pdf)/);
+          if (m && m[1] && m[1].startsWith("/")) {
+            window.__BS_OV_ABS_PATH = m[1];
+          }
+        } catch (e) {}
+
+      
+        // BS: capture absolute PDF path for server override saves
+        try {
+          const p = (spine.getAttribute('data-path') || spine.getAttribute('data-abs') || spine.getAttribute('data1') ||
+                    (spine.dataset ? (spine.dataset.abs || spine.dataset.path || spine.dataset.pdfPath || spine.dataset.pdf_path) : '') || '');
+          // extract first absolute path ending in .pdf (allow spaces)
+          const t = String(p);
+          const mm = t.match(/(\/ai_data\/ebooks\/[\s\S]*?\.pdf)/i) || t.match(/(\/[\s\S]*?\.pdf)/i);
+          const abs = (mm && mm[1]) ? mm[1].replace(/\s+/g,' ').trim() : '';
+          if (abs && abs.startsWith('/')) window.__BS_OV_ABS_PATH = abs;
+        } catch(e) {}
+}
+    }catch(e){}
+  }, true);
+
+  // Replace Save button behavior: always use modal.dataset.pdfPath first
+  function setStatus(msg, ok){
+    const st = document.getElementById("bs-edit-status");
+    if(!st) return;
+    st.textContent = msg || "";
+    st.style.color = ok ? "#b6fcb6" : "#ffb6b6";
+  }
+
+  async function saveToServer(){
+    const path = (modal.dataset && modal.dataset.pdfPath) ? modal.dataset.pdfPath : "";
+    if(!path || !path.startsWith("/") || !path.toLowerCase().includes(".pdf")){
+
+    // BS ABS PATH FROM MODAL TEXT (autopatch)
+    // Fallback: parse the visible modal text for an absolute /ai_data/ebooks/...pdf path
+    try {
+      const modal = document.getElementById("bs-ov-modal") || document.getElementById("bs-edit-modal");
+      const txt = modal ? (modal.textContent || "") : "";
+      const m = txt.match(/(\/ai_data\/ebooks\/[\s\S]*?\.pdf)/i);
+      if (m && m[1] && (!window.__BS_OV_ABS_PATH || !String(window.__BS_OV_ABS_PATH).startsWith("/"))) {
+        window.__BS_OV_ABS_PATH = m[1].replace(/\s+/g, " ").trim();
+      }
+    } catch(e) {}
+
+      setStatus("ERROR: could not detect absolute PDF path.", false);
+      return;
+    }
+
+    const title = (document.getElementById("bs-edit-title")?.value || "").trim();
+    const author = (document.getElementById("bs-edit-author")?.value || "").trim();
+
+    setStatus("Saving to server…", true);
+
+    try{
+      const r = await fetch("/api/override_path", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ path, title, author, hidden: false })
+      });
+      const j = await r.json().catch(()=> ({}));
+      if(!r.ok){
+        setStatus("ERROR saving: " + (j.detail ? JSON.stringify(j.detail) : (r.status+" "+r.statusText)), false);
+        return;
+      }
+
+      setStatus("Saved to server overrides.json ✓", true);
+
+      // Update the spine label immediately (optional but nice)
+      try{
+        const spine = window.__BS_LAST_SPINE_EL || null;
+        if(spine && title){
+          spine.setAttribute("title", title);
+          // if there is visible text inside, update it
+          // (safe: only touch if it looks like plain text)
+          if(spine.childNodes && spine.childNodes.length === 1 && spine.childNodes[0].nodeType === Node.TEXT_NODE){
+            spine.textContent = title;
+          }
+        }
+      }catch(e){}
+    }catch(e){
+      setStatus("ERROR: request failed (see console).", false);
+    }
+  }
+
+  // Bind in capture mode and block older handlers
+  document.addEventListener("click", (ev)=>{
+    const btn = ev.target && ev.target.closest ? ev.target.closest("#bs-ov-save,#bs-edit-save") : null;
+    if(!btn) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if(ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+    saveToServer();
+  }, true);
+
+  console.log("BS server save modalpath wiring loaded");
+})();
+
 </script>
   
 <!-- BS RC EDIT (autopatch) -->
@@ -922,7 +1094,7 @@
       <div style="display:flex; gap:10px;">
         <button id="bs-ov-save"
           style="background:#1f6feb; border:none; color:#fff; border-radius:10px; padding:10px 14px; cursor:pointer;">
-          Save (local)
+          Save (server)
         </button>
         <button id="bs-ov-clear"
           style="background:transparent; border:1px solid rgba(255,255,255,0.25); color:#eee; border-radius:10px;
@@ -941,7 +1113,7 @@
   const LS_KEY = "bookshelf_overrides_v1";
   let OV = {};
   try { OV = JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch(e) { OV = {}; }
-  function saveOV(){ localStorage.setItem(LS_KEY, JSON.stringify(OV)); }
+  function saveOV(){ /* server-backed now */ }
 
   function findPdfPath(el){
     if(!el) return "";
@@ -998,6 +1170,22 @@
     const t = detectedTitle(spine);
     const p = findPdfPath(spine);
     const k = keyFor(spine);
+
+    // Capture absolute PDF path once at modal-open time (stable)
+    try{
+      let abs = p || "";
+
+      // If findPdfPath didn't return a clean absolute path, fallback to parsing text
+      if(!abs || !abs.startsWith("/")){
+        const spineText = (spine && (spine.getAttribute("title") || spine.innerText || spine.textContent)) || "";
+        const m = String(spineText).match(/(\/ai_data\/ebooks\/[\s\S]*?\.(?:pdf|djvu|epub|mobi))/i);
+        if(m && m[1]) abs = m[1].replace(/\s+/g," ").trim();
+      }
+
+      if(abs && abs.startsWith("/")){
+        modal.dataset.pdfPath = abs;
+      }
+    }catch(e){}
     const o = OV[k] || {};
 
     document.getElementById("bs-detected-title").textContent = t || "(none)";
@@ -1007,7 +1195,7 @@
     document.getElementById("bs-ov-author").value = o.author || "";
 
     modal.style.display = "block";
-    setStatus("Editing overrides (stored in this browser).", true);
+    setStatus("Editing overrides (stored on server).", true);
     document.getElementById("bs-ov-title").focus();
   }
 
@@ -1093,9 +1281,1118 @@ document.addEventListener("contextmenu", function(ev){
     wire();
   }
 })();
+
+  // BS SERVER OVERRIDE WIRING (autopatch)
+  // BS FORCE SERVER SAVE ACTIVE (autopatch)
+  (function(){
+    const modal = document.getElementById("bs-edit-modal");
+    if(!modal) return;
+
+    // When opening editor, stash absolute path from the clicked spine element
+    // (We attach this by monkey-patching the existing openEditor if present.)
+    const _oldOpen = window.openEditor || null;
+    window.openEditor = function(e, spineEl){
+      try {
+        // spineEl is best; fall back to dataset already stored on modal by earlier code if any
+        const abs = (spineEl && (spineEl.getAttribute("data-abs") || (spineEl.dataset && spineEl.dataset.abs))) || e.pdf_path || e.rel_path || "";
+        if (abs) modal.dataset.pdfPath = abs;
+      } catch(err) {}
+      if (_oldOpen) return _oldOpen(e, spineEl);
+    };
+
+    // If existing code doesn’t call window.openEditor, add a capture hook on contextmenu to store spineEl.
+    document.addEventListener("contextmenu", (ev)=>{
+      const spine = ev.target.closest(".spine,[data-abs],[data-path]");
+      if (spine && modal) {
+        try { modal._lastSpineEl = spine; } catch(e) {}
+        try {
+          const abs = spine.getAttribute("data-abs") || (spine.dataset && (spine.dataset.abs || spine.dataset.path)) || "";
+          if (abs) modal.dataset.pdfPath = abs;
+        } catch(e) {}
+      }
+    }, true);
+
+    // Force Save button to server endpoint
+    const saveBtn = document.getElementById("bs-ov-save");
+    const titleIn = document.getElementById("bs-ov-title");
+    const authorIn = document.getElementById("bs-ov-author");
+    const statusEl = document.getElementById("bs-ov-status");
+    function setStatus(msg, ok=true){
+      if(!statusEl) return;
+      statusEl.textContent = msg || "";
+      statusEl.style.color = ok ? "#b6fcb6" : "#ffb6b6";
+    }
+
+    if(saveBtn){
+      saveBtn.textContent = "Save (server)";
+      saveBtn.onclick = async (ev)=>{
+        ev.preventDefault();
+        const path = (modal && modal.dataset && modal.dataset.pdfPath) || "";
+        const title = titleIn ? titleIn.value.trim() : "";
+        const author = authorIn ? authorIn.value.trim() : "";
+        if(!path || !path.startsWith("/")){
+          setStatus("ERROR: No absolute PDF path captured for this spine.", false);
+          console.warn("BS FORCE SERVER SAVE: missing path", {path});
+          return;
+        }
+
+        setStatus("Saving to server…", true);
+        try{
+          const r = await fetch("/api/override_path", {
+            method: "POST",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({path, title, author, hidden:false})
+          });
+          const j = await r.json().catch(()=> ({}));
+          console.log("BS FORCE SERVER SAVE: response", r.status, j);
+
+          if(!r.ok){
+            setStatus("Server save failed: HTTP " + r.status, false);
+            return;
+          }
+
+          setStatus("Saved to server overrides.json", true);
+
+          // Instant visual update of the clicked spine title/tooltip
+          try{
+            const spineEl = modal._lastSpineEl || null;
+            if(spineEl && title){
+              const t = spineEl.querySelector(".spineTitle");
+              if(t) t.textContent = title;
+              spineEl.setAttribute("title", title);
+            }
+          } catch(e) {}
+        } catch(err){
+          console.warn("BS FORCE SERVER SAVE: fetch error", err);
+          setStatus("Server save failed (network/error).", false);
+        }
+      };
+    }
+    console.log("BS FORCE SERVER SAVE ACTIVE");
+  })();
+
+  try {
+    const modal = document.getElementById("bs-edit-modal");
+    
+const saveBtn = document.getElementById("bs-ov-save");
+const clearBtn = document.getElementById("bs-ov-clear");
+
+// === Server-backed overrides ===
+function bsExtractPathFromModal() {
+  // Prefer any variable you already track
+  try {
+    if (window.__BS_CURRENT_PATH && String(window.__BS_CURRENT_PATH).includes(".pdf")) return window.__BS_CURRENT_PATH;
+  } catch(e) {}
+
+  // Parse from the modal text ("Detected path: ...pdf")
+  const modal = document.getElementById("bs-edit-modal");
+  if (!modal) return "";
+  const t = modal.textContent || "";
+  const m = t.match(/Detected path:\s*([^\n\r]+?\.pdf)/i);
+  if (m && m[1]) return m[1].trim();
+
+  // Last resort: search for any /ai_data/ebooks/...pdf within modal
+  const m2 = t.match(/\/ai_data\/ebooks\/[^\s]+?\.pdf/);
+  return m2 ? m2[0].trim() : "";
+}
+
+async function bsPostOverride(payload){
+  const r = await fetch("/api/override_path", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(payload),
+  });
+  const j = await r.json().catch(()=>({}));
+  return {r,j};
+}
+
+if (saveBtn) {
+  saveBtn.textContent = "Save (server)";
+  saveBtn.addEventListener("click", async (ev) => {
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+
+    const path = bsExtractPathFromModal();
+    if (!path) { setStatus("Could not detect PDF path for this spine.", false); return; }
+
+    const title = (document.getElementById("bs-ov-title")?.value || "").trim();
+    const author = (document.getElementById("bs-ov-author")?.value || "").trim();
+
+    const {r,j} = await bsPostOverride({path, title, author, hidden:false});
+    if (!r.ok || !j.ok) {
+      setStatus("Save failed: " + (j.error || ("HTTP " + r.status)), false);
+      return;
+    }
+    setStatus("Saved to server overrides.json", true);
+  }, true);
+}
+
+if (clearBtn) {
+  clearBtn.addEventListener("click", async (ev) => {
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+
+    const path = bsExtractPathFromModal();
+    if (!path) { setStatus("Could not detect PDF path for this spine.", false); return; }
+
+    const {r,j} = await bsPostOverride({path, clear:true});
+    if (!r.ok || !j.ok) {
+      setStatus("Clear failed: " + (j.error || ("HTTP " + r.status)), false);
+      return;
+    }
+    setStatus("Cleared on server.", true);
+  }, true);
+}
+clearBtn && clearBtn.addEventListener("click", async (ev)=>{
+      ev.stopImmediatePropagation();
+
+      const spine = modal && modal._spine;
+      if(!spine){ _setStatus("No spine selected.", false); return; }
+      const path = _findPdfPath(spine);
+      if(!path){ _setStatus("Could not detect PDF path.", false); return; }
+
+      try{
+        const {r,j} = await postOverride({path, clear:true});
+        if(!r.ok || !j.ok){
+          _setStatus("Clear failed: " + (j.error || ("HTTP " + r.status)), false);
+          return;
+        }
+        _setStatus("Cleared on server (refresh to restore original tooltip).", true);
+      }catch(err){
+        _setStatus("Clear error: " + err, false);
+      }
+    }, true);
+
+    console.log("BS server override wiring loaded");
+  } catch (e) {
+    console.warn("BS server override wiring failed", e);
+  }
+
 </script>
 
 
+
+
+<!-- BS SERVER WIRE V3 (autopatch) -->
+<script id="bs-server-wire-v3">
+(function(){
+  function findModal(){
+    // Prefer known modal container ids if present, else any visible overlay containing "Edit spine metadata"
+    const byId = document.getElementById("bs-edit-modal");
+    if (byId) return byId;
+    const all = Array.from(document.querySelectorAll("div"));
+    return all.find(d => (d.textContent||"").includes("Edit spine metadata")) || null;
+  }
+
+  function findPdfPathInModal(modal){
+    const txt = modal ? (modal.textContent || "") : "";
+    // match /ai_data/ebooks/... .pdf
+    const m = txt.match(/\/ai_data\/ebooks\/[^ 
+
+	]+?\.pdf/);
+    return m ? m[0] : "";
+  }
+
+  function pickButtons(modal){
+    const btns = modal ? Array.from(modal.querySelectorAll("button")) : [];
+    const save = btns.find(b => (b.textContent||"").toLowerCase().includes("save")) || null;
+    const clear = btns.find(b => (b.textContent||"").toLowerCase().includes("clear")) || null;
+    return {save, clear};
+  }
+
+  function pickInputs(modal){
+    const ins = modal ? Array.from(modal.querySelectorAll("input")) : [];
+    // assume first two inputs are title/author
+    const titleIn = ins[0] || null;
+    const authorIn = ins[1] || null;
+    return {titleIn, authorIn};
+  }
+
+  function setHint(modal, msg){
+    if(!modal) return;
+    // try to find the green hint text area
+    const nodes = Array.from(modal.querySelectorAll("div,span,p"));
+    const hint = nodes.find(n => (n.textContent||"").toLowerCase().includes("stored in this browser")) || null;
+    if (hint) hint.textContent = msg;
+  }
+
+  async function postOverride(payload){
+    const r = await fetch("/api/override_path", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json().catch(()=>({}));
+    return {r,j};
+  }
+
+  function wire(){
+    const modal = findModal();
+    if(!modal) return false;
+
+    const {save, clear} = pickButtons(modal);
+    const {titleIn, authorIn} = pickInputs(modal);
+
+    if (save) save.textContent = "Save (server)";
+    setHint(modal, "Editing overrides (stored on server).");
+
+    // Capture-phase click hijack: beats existing local handler
+    if (save && !save._bsServerV3){
+      save.addEventListener("click", async (ev)=>{
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+
+        const path = findPdfPathInModal(modal);
+        if(!path){
+          console.warn("BS V3: could not extract path from modal text");
+          return;
+        }
+        const payload = {
+          path,
+          title: (titleIn?.value || "").trim(),
+          author: (authorIn?.value || "").trim(),
+        };
+
+        const {r,j} = await postOverride(payload);
+        if(!r.ok || !j.ok){
+          console.warn("BS V3 save failed", r.status, j);
+          return;
+        }
+        console.log("BS V3 saved", j);
+      }, true);
+      save._bsServerV3 = true;
+    }
+
+    if (clear && !clear._bsServerV3){
+      clear.addEventListener("click", async (ev)=>{
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+
+        const path = findPdfPathInModal(modal);
+        if(!path){
+          console.warn("BS V3: could not extract path from modal text");
+          return;
+        }
+        const {r,j} = await postOverride({path, clear:true});
+        if(!r.ok || !j.ok){
+          console.warn("BS V3 clear failed", r.status, j);
+          return;
+        }
+        console.log("BS V3 cleared", j);
+      }, true);
+      clear._bsServerV3 = true;
+    }
+
+    console.log("BS SERVER WIRE V3 ACTIVE");
+    return true;
+  }
+
+  // The modal is created/used dynamically; retry until it’s there
+  let tries = 0;
+  const t = setInterval(()=>{
+    tries++;
+    if (wire() || tries > 80) clearInterval(t);
+  }, 250);
+})();
+
+// BS CAPTURE SAVE OVERRIDE (autopatch)
+(function(){
+  function $(sel){ return document.querySelector(sel); }
+  function setHint(msg, ok=true){
+    // Try a few known hint/status locations; fall back to console
+    const el = $("#bs-ov-hint") || $("#bs-ov-status") || $("#bs-edit-status");
+    if (el){
+      el.textContent = msg || "";
+      el.style.color = ok ? "#b6fcb6" : "#ffb6b6";
+    } else {
+      console.log("BS HINT:", msg);
+    }
+  }
+
+  function extractPdfPath(modal){
+    // Best: dataset set by earlier code
+    let p = (modal && modal.dataset && (modal.dataset.pdfPath || modal.dataset.path)) || "";
+    if (p && p.startsWith("/")) return p;
+
+    // Next: look for any text inside modal that contains an absolute path to a .pdf
+    const t = (modal && modal.innerText) ? modal.innerText : "";
+    // Prefer /ai_data/ebooks...pdf
+    let m = t.match(/(\/ai_data\/ebooks\/[^\s]+?\.pdf)/i);
+    if (m && m[1]) return m[1];
+
+    // Generic absolute path to .pdf (last resort)
+    m = t.match(/(\/[^\s]+?\.pdf)/i);
+    if (m && m[1]) return m[1];
+
+    return "";
+  }
+
+  function getTitleAuthor(modal){
+    // Don’t depend on specific IDs — just grab inputs within the editor modal.
+    // Most recent UI has two inputs: title then author.
+    const inputs = modal ? Array.from(modal.querySelectorAll("input")) : [];
+    const title = inputs[0] ? inputs[0].value.trim() : "";
+    const author = inputs[1] ? inputs[1].value.trim() : "";
+    return {title, author};
+  }
+
+  async function postOverride(path, title, author){
+    const payload = {path, title, author, hidden:false};
+    const r = await fetch("/api/override_path", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json().catch(()=> ({}));
+    console.log("BS CAPTURE SAVE: /api/override_path", r.status, j);
+    return {ok: r.ok, status: r.status, json: j};
+  }
+
+  // Capture-phase click interceptor — beats any existing onclick assignments
+  document.addEventListener("click", async (ev)=>{
+    const btn = ev.target && ev.target.closest ? ev.target.closest("#bs-ov-save") : null;
+    if (!btn) return;
+
+    // Stop any other handlers from running
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+
+    const modal = document.getElementById("bs-edit-modal") || document.querySelector("[id*='edit'][id*='modal']");
+    if (!modal){
+      setHint("ERROR: editor modal not found.", false);
+      console.warn("BS CAPTURE SAVE: no modal found");
+      return;
+    }
+
+    const path = (window.__BS_EXTRACT_PDF_PATH ? window.__BS_EXTRACT_PDF_PATH(modal) : extractPdfPath(modal));
+    const {title, author} = getTitleAuthor(modal);
+
+    console.log("BS CAPTURE SAVE: clicked", {path, title, author});
+
+    if (!path || !path.startsWith("/")){
+      setHint("ERROR: could not detect absolute PDF path for this spine.", false);
+      return;
+    }
+
+    setHint("Saving to server…", true);
+    try{
+      const res = await postOverride(path, title, author);
+      if (!res.ok){
+        setHint("Server save failed: HTTP " + res.status, false);
+        return;
+      }
+      setHint("Saved to server overrides.json", true);
+    } catch(err){
+      console.warn("BS CAPTURE SAVE: fetch error", err);
+      setHint("Server save failed (exception).", false);
+    }
+  }, true);
+
+  console.log("BS CAPTURE SAVE OVERRIDE active");
+})();
+</script>
+
+
+<!-- BS UI FORCE SERVER SAVE v1 (autopatch) -->
+<script>
+(function(){
+  function status(msg, ok){
+    const st = document.getElementById("bs-ov-status") || document.getElementById("bs-edit-status");
+    if(st){
+      st.textContent = msg || "";
+      st.style.color = ok ? "#b6fcb6" : "#ffb6b6";
+    } else {
+      console.log("BS STATUS:", msg);
+    }
+  }
+
+  function getModal(){
+    return document.getElementById("bs-edit-modal");
+  }
+
+  function extractPdfPath(modal){
+    // Prefer a stored attribute if your code sets it
+    try{
+      const dp = (modal.dataset && (modal.dataset.pdfPath || modal.dataset.path)) || "";
+      if(dp && dp.startsWith("/")) return dp;
+    }catch(e){}
+
+    // Otherwise parse any absolute pdf path from modal text
+    const t = (modal.innerText || modal.textContent || "");
+    let m = t.match(/(\/ai_data\/ebooks\/[^\s]+?\.pdf)/i);
+    if(m && m[1]) return m[1];
+    m = t.match(/(\/[^\s]+?\.pdf)/i);
+    return (m && m[1]) ? m[1] : "";
+  }
+
+  function getTitleAuthor(modal){
+    const inputs = Array.from(modal.querySelectorAll("input"));
+    return {
+      title: inputs[0] ? inputs[0].value.trim() : "",
+      author: inputs[1] ? inputs[1].value.trim() : "",
+    };
+  }
+
+  async function postOverride(path, title, author){
+    const r = await fetch("/api/override_path", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({path, title, author, hidden:false}),
+    });
+    const j = await r.json().catch(()=>({}));
+    console.log("BS UI FORCE SAVE response", r.status, j);
+    return {r,j};
+  }
+
+  // Capture-phase click handler beats any existing onclick/addEventListener
+  document.addEventListener("click", async (ev)=>{
+    const btn = ev.target && ev.target.closest ? ev.target.closest("#bs-ov-save") : null;
+    if(!btn) return;
+
+    ev.preventDefault();
+    ev.stopPropagation();
+    if(ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+
+    const modal = getModal();
+    if(!modal){ status("ERROR: modal not found", false); return; }
+
+    const path = (window.__BS_EXTRACT_PDF_PATH ? window.__BS_EXTRACT_PDF_PATH(modal) : extractPdfPath(modal));
+    const {title, author} = getTitleAuthor(modal);
+
+    console.log("BS UI FORCE SAVE posting", {path, title, author});
+    if(!path || !path.startsWith("/")){
+      status("ERROR: could not detect absolute PDF path.", false);
+      return;
+    }
+
+    // Visual feedback on button
+    const oldText = btn.textContent;
+    btn.textContent = "Saving…";
+
+    status("Saving to server…", true);
+    try{
+      const {r,j} = await postOverride(path, title, author);
+      if(!r.ok || !j.ok){
+        status("Save failed: " + (j.error || ("HTTP " + r.status)), false);
+        btn.textContent = oldText;
+        return;
+      }
+      status("Saved ✅", true);
+      btn.textContent = "Saved ✅";
+      setTimeout(()=>{ btn.textContent = oldText; }, 900);
+    }catch(e){
+      console.warn("BS UI FORCE SAVE error", e);
+      status("Save failed (exception).", false);
+      btn.textContent = oldText;
+    }
+  }, true);
+
+  // Ensure the label says server
+  window.addEventListener("load", ()=>{
+    const b = document.getElementById("bs-ov-save");
+    if(b && b.textContent.toLowerCase().includes("local")){
+      b.textContent = "Save (server)";
+    }
+  });
+
+  console.log("BS UI FORCE SERVER SAVE v1 active");
+})();
+</script>
+
+
+<!-- BS UI PATHFIX v1 (autopatch) -->
+<script>
+(function(){
+  // Capture last right-clicked spine element + any pdf path we can find on it.
+  window.__BS_LAST_PDF_PATH = "";
+
+function extractAbsPdfPathFromAnyText(t){
+  try{
+    t = String(t || "");
+    const m = t.match(/(\/ai_data\/ebooks\/[\s\S]*?\.(?:pdf|djvu|epub|mobi))/i);
+    return (m && m[1]) ? m[1].replace(/\s+/g," ").trim() : "";
+  }catch(e){
+    return "";
+  }
+}
+
+function sniffPathFromText(t){
+  try{
+    t = String(t || "");
+
+    // Prefer explicit "Detected path:" line (allows spaces)
+    const m = t.match(/Detected path:\s*([^\n\r]+)/i);
+    if(m && m[1]) return m[1].trim();
+
+    // Fallback: find any absolute /ai_data/ebooks/...pdf path (allows spaces)
+    const m2 = t.match(/(\/ai_data\/ebooks\/.*?\.(?:pdf|djvu|epub|mobi))/i);
+    if(m2 && m2[1]) return m2[1].trim();
+
+    return "";
+  } catch(e){
+    return "";
+  }
+}
+
+  document.addEventListener("contextmenu", (ev)=>{
+    try{
+      const el = ev.target && ev.target.closest ? ev.target.closest(".spine,[data-entry],[data-id],[data-path]") : null;
+      if(!el) return;
+
+      // Try several likely places
+      let p = "";
+      if(el.dataset){
+        p = el.dataset.pdfPath || el.dataset.path || el.dataset.pdf_path || "";
+      }
+      if(!p) p = el.getAttribute("data-path") || "";
+      if(!p) p = el.getAttribute("data1") || ""; // seen in your earlier console logs
+      if(p && !p.includes(".pdf")) {
+        // if it's some blob, try to extract a path from it
+        const p2 = sniffPathFromText(p);
+        if(p2) p = p2;
+      }
+
+      // Absolute-path check
+      if(p && p.includes(".pdf") && p.startsWith("/")) {
+        window.__BS_LAST_PDF_PATH = p;
+      }
+    }catch(e){}
+  }, true);
+
+  // Monkey-patch the force-save extractor if present:
+  // It will now first check modal text "Detected path:" and then last right-clicked spine path.
+  window.__BS_EXTRACT_PDF_PATH = function(modal){
+    try{
+      const t = (modal && (modal.innerText || modal.textContent)) || "";
+      const p = sniffPathFromText(t);
+      if(p && p.startsWith("/") && p.toLowerCase().endsWith(".pdf")) return p;
+    }catch(e){}
+    if(window.__BS_LAST_PDF_PATH) return window.__BS_LAST_PDF_PATH;
+    return "";
+  };
+
+  console.log("BS UI PATHFIX v1 active");
+})();
+
+
+// BS SERVER SAVE PATHFROMMODAL v2
+
+// BS SERVER SAVE PATHFROMMODAL v2 (autopatch)
+(function(){
+  function setStatus(msg, ok){
+    const st = document.getElementById("bs-edit-status");
+    if(!st) return;
+    st.textContent = msg || "";
+    st.style.color = ok ? "#b6fcb6" : "#ffb6b6";
+  }
+
+  function extractPdfPath(s){
+    if(!s) return "";
+    const t = String(s).trim();
+    // capture absolute path ending in .pdf (allow spaces)
+    // prefer /ai_data/ebooks/... first, then any /...pdf
+    let m = t.match(/(\/ai_data\/ebooks\/.+?\.pdf)/i);
+    if(m && m[1]) return m[1].trim();
+    m = t.match(/(\/.+?\.pdf)/i);
+    if(m && m[1]) return m[1].trim();
+    return "";
+  }
+
+  async function saveToServer(){
+    const modal = document.getElementById("bs-edit-modal");
+    const elPath = document.getElementById("bs-edit-path");
+
+    // Strongest source of truth: whatever the modal is displaying as "Detected path"
+    let path = extractPdfPath(elPath ? elPath.textContent : "");
+    // fallback: any dataset path that might exist
+    if(!path && modal && modal.dataset) path = extractPdfPath(modal.dataset.pdfPath || modal.dataset.path || "");
+
+    if(!path || !path.startsWith("/") || !path.toLowerCase().includes(".pdf")){
+      setStatus("ERROR: could not detect absolute PDF path.", false);
+      console.warn("BS v2: path detection failed. bs-edit-path=", elPath ? elPath.textContent : null, "modal.dataset=", modal ? modal.dataset : null);
+      return;
+    }
+
+    const title = (document.getElementById("bs-edit-title")?.value || "").trim();
+    const author = (document.getElementById("bs-edit-author")?.value || "").trim();
+
+    setStatus("Saving to server…", true);
+  }
+
+  // JS doesn't have True; fix:
+})();
+
+(function(){
+  function setStatus(msg, ok){
+    const st = document.getElementById("bs-edit-status");
+    if(!st) return;
+    st.textContent = msg || "";
+    st.style.color = ok ? "#b6fcb6" : "#ffb6b6";
+  }
+  function extractPdfPath(s){
+    if(!s) return "";
+    const t = String(s).trim();
+    let m = t.match(/(\/ai_data\/ebooks\/.+?\.pdf)/i);
+    if(m && m[1]) return m[1].trim();
+    m = t.match(/(\/.+?\.pdf)/i);
+    if(m && m[1]) return m[1].trim();
+    return "";
+  }
+  async function saveToServer(){
+    const modal = document.getElementById("bs-edit-modal");
+    const elPath = document.getElementById("bs-edit-path");
+
+    let path = extractPdfPath(elPath ? elPath.textContent : "");
+    if(!path && modal && modal.dataset) path = extractPdfPath(modal.dataset.pdfPath || modal.dataset.path || "");
+
+    if(!path || !path.startsWith("/") || !path.toLowerCase().includes(".pdf")){
+      setStatus("ERROR: could not detect absolute PDF path.", false);
+      console.warn("BS v2: path detection failed. bs-edit-path=", elPath ? elPath.textContent : null, "modal.dataset=", modal ? modal.dataset : null);
+      return;
+    }
+
+    const title = (document.getElementById("bs-edit-title")?.value || "").trim();
+    const author = (document.getElementById("bs-edit-author")?.value || "").trim();
+
+    setStatus("Saving to server…", true);
+
+    try{
+      const r = await fetch("/api/override_path", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ path, title, author, hidden: false })
+      });
+      const j = await r.json().catch(()=> ({}));
+      if(!r.ok){
+        setStatus("ERROR saving: " + (j.detail ? JSON.stringify(j.detail) : (r.status+" "+r.statusText)), false);
+        return;
+      }
+      setStatus("Saved to server overrides.json ✓", true);
+      console.log("BS v2 saved:", j);
+
+      // optional immediate UI update: update the spine tooltip text only
+      try{
+        const spine = window.__BS_LAST_SPINE_EL || null;
+        if(spine && title){
+          spine.setAttribute("title", title);
+        }
+      }catch(e){}
+    }catch(e){
+      setStatus("ERROR: request failed (see console).", false);
+      console.warn("BS v2 request failed", e);
+    }
+  }
+
+  // Capture clicks in CAPTURE mode and override prior handlers
+  document.addEventListener("click", (ev)=>{
+    const btn = ev.target && ev.target.closest ? ev.target.closest("#bs-ov-save,#bs-edit-save") : null;
+    if(!btn) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if(ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+    saveToServer();
+  }, true);
+
+  console.log("BS server save path-from-modal wiring loaded");
+})();
+
+
+
+// BS SERVER SAVE PATHFROMMODAL v3
+
+// BS SERVER SAVE PATHFROMMODAL v3 (autopatch)
+(function(){
+  function setStatus(msg, ok){
+    // try both status ids (older/newer)
+    const st = document.getElementById("bs-edit-status") || document.getElementById("bs-ov-status");
+    if(!st) return;
+    st.textContent = msg || "";
+    st.style.color = ok ? "#b6fcb6" : "#ffb6b6";
+  }
+
+  function extractPdfPathFromText(t){
+    if(!t) return "";
+    const s = String(t);
+
+    // Best: a real absolute path under /ai_data/ebooks ending in .pdf (allow spaces/newlines)
+    let m = s.match(/(\/ai_data\/ebooks\/[\s\S]*?\.pdf)/i);
+    if(m && m[1]){
+      return m[1].replace(/\s+/g, " ").trim();
+    }
+
+    // Fallback: any absolute /...pdf
+    m = s.match(/(\/[\s\S]*?\.pdf)/i);
+    if(m && m[1]){
+      return m[1].replace(/\s+/g, " ").trim();
+    }
+    return "";
+  }
+
+  async function saveToServer(btn){
+    // Find the modal containing the button
+    const modal =
+      btn.closest("#bs-edit-modal") ||
+      btn.closest("[role='dialog']") ||
+      btn.closest("[id*='modal']") ||
+      document.getElementById("bs-edit-modal") ||
+      document.body;
+
+    // Pull the displayed "Detected path" line from the modal text
+    const modalText = modal ? (modal.innerText || modal.textContent || "") : "";
+    const path = extractPdfPathFromText(modalText);
+
+    if(!path || !path.startsWith("/") || !path.toLowerCase().includes(".pdf")){
+      setStatus("ERROR: could not detect absolute PDF path.", false);
+      console.warn("BS v3 path detection failed. modalText(sample)=", modalText.slice(0, 400));
+      return;
+    }
+
+    const titleEl = document.getElementById("bs-edit-title") || document.getElementById("bs-ov-title");
+    const authorEl = document.getElementById("bs-edit-author") || document.getElementById("bs-ov-author");
+    const title = (titleEl?.value || "").trim();
+    const author = (authorEl?.value || "").trim();
+
+    setStatus("Saving to server…", true);
+
+    try{
+      const r = await fetch("/api/override_path", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ path, title, author, hidden: false })
+      });
+      const j = await r.json().catch(()=> ({}));
+      if(!r.ok){
+        setStatus("ERROR saving: " + (j.detail ? JSON.stringify(j.detail) : (r.status+" "+r.statusText)), false);
+        console.warn("BS v3 save failed:", j);
+        return;
+      }
+      setStatus("Saved to server overrides.json ✓", true);
+      console.log("BS v3 saved:", j);
+    }catch(e){
+      setStatus("ERROR: request failed (see console).", false);
+      console.warn("BS v3 request failed", e);
+    }
+  }
+
+  // Capture clicks on Save in capture phase and override earlier handlers
+  document.addEventListener("click", (ev)=>{
+    const btn = ev.target && ev.target.closest ? ev.target.closest("#bs-ov-save,#bs-edit-save") : null;
+    if(!btn) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if(ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+    saveToServer(btn);
+  }, true);
+
+  
+// --- ABS PDF PATH EXTRACTOR (autopatch) ---
+function __bs_extractAbsPdfPath(text){
+  try{
+    if(!text) return "";
+    const s = String(text);
+    // grab first absolute unix path ending in .pdf (allow spaces as %20 not expected here; we look for .pdf)
+    const m = s.match(/\/[^<>"']+?\.pdf/);
+    return (m && m[0]) ? m[0].trim() : "";
+  } catch(e){ return ""; }
+}
+
+function getAbsPdfPath(){
+  // 1) explicit global, if set
+  if (window.__BS_OV_ABS_PATH && String(window.__BS_OV_ABS_PATH).startsWith("/")) return String(window.__BS_OV_ABS_PATH);
+  // 2) try from modal detected path text
+  const dp = document.getElementById("bs-ov-dpath");
+  const fromModal = __bs_extractAbsPdfPath(dp ? dp.textContent : "");
+  if (fromModal) return fromModal;
+  // 3) try last spine element attributes (title, data-path, data-entry)
+  const el = window.__BS_LAST_SPINE_EL;
+  if (el){
+    const t = el.getAttribute("title") || "";
+    const fromTitle = __bs_extractAbsPdfPath(t);
+    if (fromTitle) return fromTitle;
+    const dp2 = el.dataset ? (el.dataset.path || "") : "";
+    if (dp2 and dp2.startswith("/")) return dp2;
+    const ent = el.dataset ? (el.dataset.entry or "") : "";
+    try{
+      if(ent){
+        const e = JSON.parse(ent);
+        const p = e.pdf_path || e.path || "";
+        if (p && String(p).startsWith("/")) return String(p);
+      }
+    } catch(e){}
+  }
+  return "";
+}
+// --- END ABS PDF PATH EXTRACTOR ---
+
+console.log("BS server save path-from-modal v3 loaded");
+})();
+
+
+
+// BS SERVER SAVE (capture handler v1)
+(function(){
+  // We capture the last spine + abs path when the editor opens.
+  // Even if the existing code changes, this gives us a stable source of truth.
+  function detectAbsPdfPath(){
+    // 1) best: captured global (set by contextmenu hook)
+    try {
+      if (window.__BS_OV_ABS_PATH && window.__BS_OV_ABS_PATH.startsWith("/")) return window.__BS_OV_ABS_PATH;
+    } catch(e){}
+
+    // 2) modal dataset
+    try {
+      const m = document.getElementById("bs-ov-modal") || document.getElementById("bs-edit-modal");
+      const p = m && m.dataset ? (m.dataset.pdfPath || m.dataset.path || "") : "";
+      if (p && p.startsWith("/")) return p;
+    } catch(e){}
+
+    // 3) regex scan the modal text for a /ai_data/...pdf path
+    try {
+      const m = document.getElementById("bs-ov-modal") || document.getElementById("bs-edit-modal");
+      const txt = (m && (m.innerText || m.textContent) || "");
+      const m1 = txt.match(/(\/ai_data\/ebooks\/[^\s]+?\.pdf)/);
+      if (m1 && m1[1]) return m1[1];
+      const m2 = txt.match(/(\/home\/[^ \n]+?\.pdf)/);
+      if (m2 && m2[1]) return m2[1];
+    } catch(e){}
+
+    return "";
+  }
+
+  // Capture-phase click handler beats any bubble-phase handlers.
+  document.addEventListener("click", async (ev) => {
+    const btn = ev.target && ev.target.closest ? ev.target.closest("#bs-ov-save") : null;
+    if (!btn) return;
+
+    // Prevent older handlers from running
+    ev.preventDefault();
+    ev.stopPropagation();
+    ev.stopImmediatePropagation();
+
+    const modal = document.getElementById("bs-ov-modal") || document.getElementById("bs-edit-modal");
+    const statusEl = document.getElementById("bs-ov-status") || document.getElementById("bs-edit-status");
+
+    const setStatus = (msg, ok=true) => {
+      if (!statusEl) return;
+      statusEl.textContent = msg || "";
+      statusEl.style.color = ok ? "#b6fcb6" : "#ffb6b6";
+    };
+
+    const absPath = detectAbsPdfPath();
+    if (!absPath) {
+      setStatus("ERROR: could not detect absolute PDF path.", false);
+      return;
+    }
+
+    // Pull values
+    const inTitle = document.getElementById("bs-ov-title") || document.getElementById("bs-edit-title");
+    const inAuthor = document.getElementById("bs-ov-author") || document.getElementById("bs-edit-author");
+
+    const title = inTitle ? (inTitle.value || "").trim() : "";
+    const author = inAuthor ? (inAuthor.value || "").trim() : "";
+
+    try {
+      setStatus("Saving to server…", true);
+      const r = await fetch("/api/override_path", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({path: absPath, title, author, hidden: false})
+      });
+      const j = await r.json().catch(()=> ({}));
+      if (!r.ok || !j.ok) {
+        setStatus("ERROR saving to server: " + (j.detail || r.status), false);
+        return;
+      }
+
+      setStatus("Saved to server overrides.json ✓", true);
+
+      // Update the last-spine tooltip/text immediately (best-effort)
+      try {
+        const el = window.__BS_LAST_SPINE_EL;
+        if (el) {
+          if (title) el.setAttribute("title", title);
+          // If spine has text node content, update it (keeps UI responsive)
+          if (title && (el.childNodes.length === 1 && el.childNodes[0].nodeType === Node.TEXT_NODE)) {
+            el.textContent = title;
+          }
+        }
+      } catch(e){}
+
+    } catch (e) {
+      setStatus("ERROR saving: " + (e && e.message ? e.message : e), false);
+    }
+  }, true);
+
+  console.log("BS server save capture handler loaded");
+})();
+
+
+// BS SERVER SAVE ABS-PATH FIX (autopatch)
+(function(){
+  const MARK = "BS SERVER SAVE ABS-PATH FIX (autopatch)";
+
+  function findPdfPathFromText(s){
+    if(!s) return null;
+    // prefer ai_data paths, otherwise any absolute .pdf
+    let m = s.match(/(\/ai_data\/[^\n\r]+?\.pdf)/i);
+    if(m && m[1]) return m[1].trim();
+    m = s.match(/(\/[^\s\n\r]+?\.pdf)/i);
+    if(m && m[1]) return m[1].trim();
+    return null;
+  }
+
+  function detectAbsPdfPath(){
+    try {
+      if (window.__BS_OV_ABS_PATH && typeof window.__BS_OV_ABS_PATH === "string" && window.__BS_OV_ABS_PATH.startsWith("/"))
+        return window.__BS_OV_ABS_PATH.trim();
+    } catch(e){}
+
+    // Try last spine element
+    try {
+      const el = window.__BS_LAST_SPINE_EL || null;
+      if (el) {
+        const p = findPdfPathFromText(el.textContent || "");
+        if (p) return p;
+      }
+    } catch(e){}
+
+    // Try modal text itself
+    try {
+      const modal =
+        document.getElementById("bs-edit-modal") ||
+        document.getElementById("bs-ov-modal") ||
+        null;
+      if (modal) {
+        const p = findPdfPathFromText(modal.textContent || "");
+        if (p) return p;
+      }
+    } catch(e){}
+
+    return null;
+  }
+
+  function setStatus(msg, ok){
+    const st =
+      document.getElementById("bs-edit-status") ||
+      document.getElementById("bs-ov-status") ||
+      null;
+    if(!st) return;
+    st.textContent = msg || "";
+    st.style.color = ok ? "#b6fcb6" : "#ffb6b6";
+  }
+
+  function updateSpineVisibleTitle(newTitle){
+    try {
+      const el = window.__BS_LAST_SPINE_EL || null;
+      if(!el || !newTitle) return;
+
+      const txt = (el.textContent || "").split(/\r?\n/).filter(x => x.trim().length);
+      if(!txt.length) return;
+
+      txt[0] = newTitle;
+      el.textContent = txt.join("\n");
+      el.setAttribute("title", newTitle);
+    } catch(e){}
+  }
+
+  // Capture-phase click handler to beat earlier/local handlers.
+  document.addEventListener("click", async (ev) => {
+    const btn = ev.target && ev.target.closest ? ev.target.closest("#bs-ov-save, #bs-edit-save") : null;
+    if(!btn) return;
+
+    ev.preventDefault();
+    ev.stopPropagation();
+    try { ev.stopImmediatePropagation(); } catch(e){}
+
+    const titleEl = document.getElementById("bs-edit-title") || document.getElementById("bs-ov-title");
+    const authorEl = document.getElementById("bs-edit-author") || document.getElementById("bs-ov-author");
+    const title = titleEl ? (titleEl.value || "").trim() : "";
+    const author = authorEl ? (authorEl.value || "").trim() : "";
+
+    const absPath = detectAbsPdfPath();
+    if(!absPath){
+      setStatus("ERROR: could not detect absolute PDF path.", false);
+      console.warn("ABS-PATH FIX: could not detect path");
+      return;
+    }
+
+    try { window.__BS_OV_ABS_PATH = absPath; } catch(e){}
+
+    setStatus("Saving to server…", true);
+
+    const payload = { path: absPath, title: title, author: author, hidden: false };
+    console.log("BS UI server-save posting", payload);
+
+    try{
+      const r = await fetch("/api/override_path", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json().catch(()=> ({}));
+      if(!r.ok){
+        setStatus("Server save failed: HTTP " + r.status, false);
+        console.warn("Server save failed:", r.status, j);
+        return;
+      }
+      setStatus("Saved to server overrides.json", true);
+      updateSpineVisibleTitle(title || "(untitled)");
+      console.log("BS server-save OK", j);
+    } catch(err){
+      setStatus("Server save failed: " + (err && err.message ? err.message : err), false);
+      console.warn("Server save exception:", err);
+    }
+  }, true);
+
+  console.log(MARK);
+})();
+
+
+
+// BS OV CAPTURE PATH ON CONTEXTMENU (autopatch)
+(function(){
+  function findPdfPathFromText(s){
+    if(!s) return null;
+    let m = s.match(/(\/ai_data\/[^\n\r]+?\.pdf)/i);
+    if(m && m[1]) return m[1].trim();
+    m = s.match(/(\/[^\s\n\r]+?\.pdf)/i);
+    if(m && m[1]) return m[1].trim();
+    return null;
+  }
+
+  document.addEventListener("contextmenu", (ev)=>{
+    try{
+      const spine = ev.target && ev.target.closest ? ev.target.closest(".spine") : null;
+      if(!spine) return;
+      window.__BS_LAST_SPINE_EL = spine;
+
+      // 1) try text content (your DOM already contains /ai_data/...pdf)
+      let p = findPdfPathFromText(spine.textContent || "");
+
+      // 2) try title attribute as a fallback
+      if(!p) p = findPdfPathFromText(spine.getAttribute("title") || "");
+
+      // 3) try any data attributes as a fallback
+      if(!p && spine.dataset){
+        p = findPdfPathFromText(spine.dataset.path || "") || findPdfPathFromText(spine.dataset.pdf_path || "");
+      }
+
+      if(p){
+        window.__BS_OV_ABS_PATH = p;
+        console.log("BS ctx path captured:", p);
+      } else {
+        console.warn("BS ctx path capture: no pdf path found on spine");
+      }
+    } catch(e){
+      console.warn("BS ctx path capture error", e);
+    }
+  }, true);
+
+  console.log("BS OV CAPTURE PATH ON CONTEXTMENU (autopatch) loaded");
+})();
+
+</script>
 
 </body>
 </html>

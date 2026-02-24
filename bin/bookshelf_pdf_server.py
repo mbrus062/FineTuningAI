@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import os, json, sqlite3
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Body
+
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -388,6 +389,7 @@ def override(data: OverrideIn):
 
 
 from fastapi.responses import HTMLResponse  # (already imported in your file)
+import bookshelf_overrides as bsov
 
 
 @app.get("/view", response_class=HTMLResponse)
@@ -401,3 +403,20 @@ def view(id: str):
 <body>
 <iframe src="/api/pdf?id={id}"></iframe>
 </body></html>"""
+
+
+@app.post("/api/override_path")
+def api_override_path(payload: dict = Body(...)):
+    """
+    Payload:
+      {"path": "...pdf", "title": "...", "author": "...", "hidden": true|false, "clear": true|false}
+    Keyed by absolute PDF path.
+    """
+    return bsov.update_override(
+        path=payload.get("path"),
+        title=payload.get("title") if "title" in payload else None,
+        author=payload.get("author") if "author" in payload else None,
+        hidden=payload.get("hidden") if "hidden" in payload else None,
+        clear=bool(payload.get("clear")),
+    )
+
