@@ -306,24 +306,33 @@ def api_index():
 
         entries = []
         for r in rows:
-            entries.append(
-                {
-                    "id": r["id"],
-                    "rel_path": r["pdf_path"],  # UI often calls it rel_path
-                    "pdf_path": r["pdf_path"],
-                    "title": r["title"],
-                    "spine_title": r["spine_title"],
-                    "mtime": r["mtime"],
-                    "size": r["size"],
-                    # placeholders (until we add real columns)
-                    "author": "",
-                    "language": "",
-                    "source": "",
-                    "tradition": "",
-                    "status": "pdf",
-                }
-            )
+            entry = {
+                "id": r["id"],
+                "rel_path": r["pdf_path"],  # UI often calls it rel_path
+                "pdf_path": r["pdf_path"],
+                "title": r["title"],
+                "spine_title": r["spine_title"],
+                "mtime": r["mtime"],
+                "size": r["size"],
+                # placeholders (until we add real columns)
+                "author": "",
+                "language": "",
+                "source": "",
+                "tradition": "",
+                "status": "pdf",
+            }
 
+            # Apply overrides.json (keyed by absolute pdf_path)
+            ov = load_overrides().get(entry["pdf_path"], {})
+            if ov.get("hidden") is True:
+                continue
+            if (ov.get("title") or "").strip():
+                entry["title"] = ov["title"].strip()
+                entry["spine_title"] = ov["title"].strip()
+            if ov.get("author") is not None and ov.get("author") != "":
+                entry["author"] = ov["author"]
+
+            entries.append(entry)
         return {"entries": entries}
     finally:
         conn.close()
@@ -408,8 +417,7 @@ def view(id: str):
 @app.post("/api/override_path")
 def api_override_path(payload: dict = Body(...)):
     """
-    Payload:
-      {"path": "...pdf", "title": "...", "author": "...", "hidden": true|false, "clear": true|false}
+    Payload: {"path": "...pdf", "title": "...", "author": "...", "hidden": true|false, "clear": true|false}
     Keyed by absolute PDF path.
     """
     return bsov.update_override(
@@ -419,4 +427,3 @@ def api_override_path(payload: dict = Body(...)):
         hidden=payload.get("hidden") if "hidden" in payload else None,
         clear=bool(payload.get("clear")),
     )
-
