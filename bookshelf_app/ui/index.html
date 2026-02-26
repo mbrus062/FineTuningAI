@@ -492,6 +492,8 @@
 
       let VIEW = "shelf";
       const SHELF_MAX = 50000;
+      let SHELF_RENDER_N = 500;       // initial render size
+      const SHELF_RENDER_STEP = 500;  // how many more per scroll
       let SHUFFLED = false;
 
       const el = (id) => document.getElementById(id);
@@ -655,7 +657,7 @@
           }
           return true;
         });
-
+        SHELF_RENDER_N = 500;
         el("count").textContent = `${FILTERED.length.toLocaleString()} items`;
         render();
       }
@@ -707,17 +709,88 @@
         }
       }
 
+      function _seriesKey(title){
+        title = (title || "").toString().trim();
+
+        // Normalize common volume markers: Vol, Vol., Volume, Book, Part + number/roman
+        // Remove trailing volume tokens so series name groups together.
+        title = title.replace(/\b(vol\.?|volume|book|part)\s*([0-9]+|[ivxlcdm]+)\b/ig, "").trim();
+
+        // Normalize whitespace/punctuation
+        title = title.replace(/\s+/g, " ").replace(/\s*[-:]\s*$/g, "").trim();
+
+        return title.toLowerCase();
+      }
+
+      function _seriesIndex(title){
+        title = (title || "").toString();
+
+        // Prefer Arabic numbers
+        let m = title.match(/\b(?:vol\.?|volume|book|part)\s*([0-9]+)\b/i);
+        if(m) return parseInt(m[1], 10);
+
+        // Roman numerals (I, II, III, IV, V...)
+        m = title.match(/\b(?:vol\.?|volume|book|part)\s*([ivxlcdm]+)\b/i);
+        if(m){
+          const r = m[1].toUpperCase();
+          const map = {I:1,V:5,X:10,L:50,C:100,D:500,M:1000};
+          let n=0, prev=0;
+          for(let i=r.length-1;i>=0;i--){
+            const v=map[r[i]]||0;
+            if(v<prev) n-=v; else {n+=v; prev=v;}
+          }
+          return n || 0;
+        }
+
+        return 0; // non-series / no volume marker
+      }
+      let _shelfScrollWired = false;
+
+      function wireShelfInfiniteScroll(){
+        if (_shelfScrollWired) return;
+        _shelfScrollWired = true;
+
+        window.addEventListener("scroll", () => {
+          // Don't auto-load more while we are restoring scroll/filter state
+          try { if (window.__BS_RESTORING) return; } catch(e) {}        
+          
+          // Only apply in Shelf view (if VIEW exists); if not, it still works globally
+          try { if (typeof VIEW !== "undefined" && VIEW !== "shelf") return; } catch(e) {}
+
+          const nearBottom =
+            (window.innerHeight + window.scrollY) >= (document.body.offsetHeight - 250);
+          if (!nearBottom) return;
+
+          const want = Math.min(SHELF_RENDER_N + SHELF_RENDER_STEP, SHELF_MAX, FILTERED.length);
+          if (want === SHELF_RENDER_N) return;
+
+          SHELF_RENDER_N = want;
+          renderShelf();
+        }, { passive: true });
+      }
       function renderShelf() {
         const sp = el("spines");
         sp.innerHTML = "";
-
-        let slice = FILTERED.slice(0, SHELF_MAX);
-
+        wireShelfInfiniteScroll();
+        let slice = FILTERED.slice(0, Math.min(SHELF_RENDER_N, SHELF_MAX));
         if (SHUFFLED) {
           slice = slice
             .slice()
-            .sort((a, b) => hash32(a.id || "") - hash32(b.id || ""))
-            .reverse();
+            .sort((a, b) => {
+              const at = (a.spine_title || a.title || "");
+              const bt = (b.spine_title || b.title || "");
+
+              const ak = _seriesKey(at);
+              const bk = _seriesKey(bt);
+              if (ak !== bk) return ak.localeCompare(bk);
+
+              const ai = _seriesIndex(at);
+              const bi = _seriesIndex(bt);
+              if (ai !== bi) return ai - bi;
+
+              // Tie-breaker
+              return (at || "").localeCompare(bt || "");
+            });
         }
 
         el("shelfNote").textContent =
@@ -726,6 +799,14 @@
         for (const e of slice) {
           const d = document.createElement("div");
           d.className = "spine";
+          // Force visual clustering by series name, then volume number
+          const t = (e.spine_title || e.title || "");
+          const sk = _seriesKey(t);
+          const si = _seriesIndex(t);
+
+          // Stable numeric order: series bucket + volume
+          const sh = (hash32(sk) >>> 0) % 1000000;
+          d.style.order = (sh * 100) + (si || 0);
 
           const st = spineStyleFor(e);
           d.style.setProperty("--spineBase", st.bg);
@@ -861,6 +942,7 @@
         });
 
         FILTERED = INDEX;
+        SHELF_RENDER_N = 500;
         applyFilters();
       }
 
@@ -1253,18 +1335,30 @@
       saveOV();
       setStatus("Cleared override (refresh to restore original tooltip if needed).", true);
     });
+    // Enter key triggers Save (local) while cursor is in title/author field
+    document.addEventListener("keydown", function(e){
+      if (e.key !== "Enter") return;
 
+      const ae = document.activeElement;
+      if (!ae) return;
+
+      // Only when typing inside the modal inputs
+      if (!(ae.id === "bs-ov-title" || ae.id === "bs-ov-author")) return;
+
+      e.preventDefault();
+      if (saveBtn) saveBtn.click();
+    }, true);
     // Apply overrides to any spines already rendered
     document.querySelectorAll(".spine").forEach(applyOverrideToSpine);
 
     // DEBUG + intercept only when we truly hit a spine-ish element
     document.addEventListener("click", function(ev){
-  if(!ev.shiftKey) return;
-  const s = ev.target.closest && ev.target.closest(".spine");
-  console.log("BS SHIFT+CLICK target=", ev.target, " spine=", s);
-}, true);
+      if(!ev.shiftKey) return;
+      const s = ev.target.closest && ev.target.closest(".spine");
+      console.log("BS SHIFT+CLICK target=", ev.target, " spine=", s);
+    }, true);
 
-document.addEventListener("contextmenu", function(ev){
+    document.addEventListener("contextmenu", function(ev){
       const spine = bestSpineFromEventTarget(ev.target);
       console.log("BS contextmenu target=", ev.target, " spine=", spine);
       if(!spine) return; // normal menu elsewhere
@@ -1280,6 +1374,49 @@ document.addEventListener("contextmenu", function(ev){
   } else {
     wire();
   }
+})();
+
+// --- Restore filters + view + scroll position after reload ---
+(function restoreShelfState(){
+  try { window.__BS_RESTORING = true; } catch(e) {}
+  function get(k){ try { return localStorage.getItem(k) || ""; } catch(e) { return ""; } }
+  function del(k){ try { localStorage.removeItem(k); } catch(e) {} }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    // Restore search + filters
+    const q = get("bs_q");
+    const trad = get("bs_trad");
+    const source = get("bs_source");
+    const lang = get("bs_lang");
+    const status = get("bs_status");
+    const view = get("bs_view");
+
+    if (q) { const el = document.getElementById("q"); if (el) el.value = q; }
+    if (trad) { const el = document.getElementById("trad"); if (el) el.value = trad; }
+    if (source) { const el = document.getElementById("source"); if (el) el.value = source; }
+    if (lang) { const el = document.getElementById("lang"); if (el) el.value = lang; }
+    if (status) { const el = document.getElementById("status"); if (el) el.value = status; }
+    try { if (view && typeof VIEW !== "undefined") VIEW = view; } catch(e) {}
+    // Re-apply filters (this triggers render)
+    try { if (typeof applyFilters === "function") applyFilters(); } catch(e) {}
+
+    // Restore scroll after render has had a moment
+    let y = 0;
+    try { y = parseInt(get("bs_scrollY") || "0", 10) || 0; } catch(e) { y = 0; }
+
+    // Cleanup stored state
+    del("bs_q"); del("bs_trad"); del("bs_source"); del("bs_lang"); del("bs_status"); del("bs_view"); del("bs_scrollY");
+
+    if (!y) { try { window.__BS_RESTORING = false; } catch(e) {} return; }
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          window.scrollTo(0, y);
+          setTimeout(() => { try { window.__BS_RESTORING = false; } catch(e) {} }, 0);
+        })
+      )
+    );
+  }, { once: true });
 })();
 
   // BS SERVER OVERRIDE WIRING (autopatch)
@@ -1374,57 +1511,59 @@ document.addEventListener("contextmenu", function(ev){
   try {
     const modal = document.getElementById("bs-edit-modal");
     
-const saveBtn = document.getElementById("bs-ov-save");
-const clearBtn = document.getElementById("bs-ov-clear");
+    const saveBtn = document.getElementById("bs-ov-save");
+    const clearBtn = document.getElementById("bs-ov-clear");
 
-// === Server-backed overrides ===
-function bsExtractPathFromModal() {
-  // Prefer any variable you already track
-  try {
-    if (window.__BS_CURRENT_PATH && String(window.__BS_CURRENT_PATH).includes(".pdf")) return window.__BS_CURRENT_PATH;
-  } catch(e) {}
+    // === Server-backed overrides ===
+    function bsExtractPathFromModal(){
+      const modal = document.getElementById("bs-edit-modal");
+      if (!modal) return "";
 
-  // Parse from the modal text ("Detected path: ...pdf")
-  const modal = document.getElementById("bs-edit-modal");
-  if (!modal) return "";
-  const t = modal.textContent || "";
-  const m = t.match(/Detected path:\s*([^\n\r]+?\.pdf)/i);
-  if (m && m[1]) return m[1].trim();
+      // 1) explicit data attribute
+      const p =
+        modal.getAttribute("data-pdf") ||
+        (modal.dataset && (modal.dataset.pdf || modal.dataset.pdfPath || modal.dataset.path)) ||
+        "";
+      if (p && p.includes(".pdf")) return String(p).trim();
 
-  // Last resort: search for any /ai_data/ebooks/...pdf within modal
-  const m2 = t.match(/\/ai_data\/ebooks\/[^\s]+?\.pdf/);
-  return m2 ? m2[0].trim() : "";
-}
+      // 2) parse from visible text: "Detected path: ...pdf"
+      const t = modal.textContent || "";
+      const m = t.match(/Detected path:\s*([^\n\r]+?\.pdf)/i);
+      if (m && m[1]) return m[1].trim();
 
-async function bsPostOverride(payload){
-  const r = await fetch("/api/override_path", {
-    method: "POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify(payload),
-  });
-  const j = await r.json().catch(()=>({}));
-  return {r,j};
-}
-
-if (saveBtn) {
-  saveBtn.textContent = "Save (server)";
-  saveBtn.addEventListener("click", async (ev) => {
-    ev.preventDefault();
-    ev.stopImmediatePropagation();
-
-    const path = bsExtractPathFromModal();
-    if (!path) { setStatus("Could not detect PDF path for this spine.", false); return; }
-
-    const title = (document.getElementById("bs-ov-title")?.value || "").trim();
-    const author = (document.getElementById("bs-ov-author")?.value || "").trim();
-
-    const {r,j} = await bsPostOverride({path, title, author, hidden:false});
-    if (!r.ok || !j.ok) {
-      setStatus("Save failed: " + (j.error || ("HTTP " + r.status)), false);
-      return;
+      // 3) last resort: any /ai_data/ebooks/...pdf in modal text
+      const m2 = t.match(/\/ai_data\/ebooks\/[^\s]+?\.pdf/i);
+      return m2 ? m2[0].trim() : "";
     }
-    setStatus("Saved to server overrides.json", true);
-  }, true);
+    async function bsPostOverride(payload){
+      const r = await fetch("/api/override_path", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json().catch(()=>({}));
+      return {r,j};
+    }
+
+    if (saveBtn) {
+      saveBtn.textContent = "Save (server)";
+      saveBtn.addEventListener("click", async (ev) => {
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+
+        const path = bsExtractPathFromModal();
+        if (!path) { setStatus("Could not detect PDF path for this spine.", false); return; }
+
+        const title = (document.getElementById("bs-ov-title")?.value || "").trim();
+        const author = (document.getElementById("bs-ov-author")?.value || "").trim();
+
+        const {r,j} = await bsPostOverride({path, title, author, hidden:false});
+        if (!r.ok || !j.ok) {
+          setStatus("Save failed: " + (j.error || ("HTTP " + r.status)), false);
+          return;
+        }
+        setStatus("Saved to server overrides.json", true);
+      }, true);
 }
 
 if (clearBtn) {
@@ -1443,6 +1582,62 @@ if (clearBtn) {
     setStatus("Cleared on server.", true);
   }, true);
 }
+// --- HIDE FROM SHELF (server) ---
+if (clearBtn) {
+  const STATUS = (window._setStatus || window.setStatus || function(){});
+  let hideBtn = document.getElementById("bs-ov-hide");
+
+  if (!hideBtn) {
+    hideBtn = document.createElement("button");
+    hideBtn.id = "bs-ov-hide";
+    hideBtn.type = "button";
+    hideBtn.textContent = "Hide from shelf";
+    hideBtn.className = clearBtn.className || "";
+    clearBtn.parentElement && clearBtn.parentElement.appendChild(hideBtn);
+  }
+
+  hideBtn.onclick = async (ev) => {
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+
+    // Immediate feedback (so you SEE something happen)
+    try { STATUS("Hiding from shelf…", true); } catch (e) {}
+    const path = bsExtractPathFromModal();
+    console.log("BS HIDE clicked; path=", path);
+
+    if (!path) {
+      try { STATUS("Hide failed: could not detect PDF path.", false); } catch (e) {}
+      return;
+    }
+    const title = (document.getElementById("bs-ov-title")?.value || "").trim();
+    const author = (document.getElementById("bs-ov-author")?.value || "").trim();
+
+    try {
+      const { r, j } = await bsPostOverride({ path, title, author, hidden: true });
+      console.log("BS HIDE response:", r?.status, j);
+
+      if (!r.ok || !j.ok) {
+        try { STATUS("Hide failed: " + (j?.error || ("HTTP " + r.status)), false); } catch (e) {}
+        return;
+      }
+      try { STATUS("Hidden from shelf. Reloading…", true); } catch (e) {}
+      
+      try { localStorage.setItem("bs_q", (document.getElementById("q")?.value || "")); } catch(e) {}
+      try { localStorage.setItem("bs_trad", (document.getElementById("trad")?.value || "")); } catch(e) {}
+      try { localStorage.setItem("bs_source", (document.getElementById("source")?.value || "")); } catch(e) {}
+      try { localStorage.setItem("bs_lang", (document.getElementById("lang")?.value || "")); } catch(e) {}
+      try { localStorage.setItem("bs_status", (document.getElementById("status")?.value || "")); } catch(e) {}
+      try { localStorage.setItem("bs_view", (typeof VIEW !== "undefined" ? VIEW : "shelf")); } catch(e) {}
+      try { localStorage.setItem("bs_scrollY", String(window.scrollY || 0)); } catch(e) {}
+      location.reload();
+    } catch (err) {
+      console.log("BS HIDE error:", err);
+      try { STATUS("Hide error: " + err, false); } catch (e) {}
+    }
+  };
+}
+// --- END HIDE FROM SHELF ---
+
 clearBtn && clearBtn.addEventListener("click", async (ev)=>{
       ev.stopImmediatePropagation();
 
